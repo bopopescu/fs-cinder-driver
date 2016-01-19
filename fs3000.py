@@ -307,7 +307,7 @@ class CCFS3000RESTClient(object):
         return None if err else resp
     def get_active_fc_wwns(self, initiator):
         url_parameter = {'service' : 'FCLunMappingService',
-                         'action' : 'getTargetPortNameByInitator',
+                         'action' : 'getTargetPortNumberByInitator',
                          'wwn' : initiator}
         err, resp = self.request(url_parameter)
         return resp

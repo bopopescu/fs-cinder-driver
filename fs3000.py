@@ -23,10 +23,10 @@ import re
 import types
 import urllib2
 
-from oslo_concurrency import lockutils
-from oslo_config import cfg
-from oslo_log import log as logging
-from oslo_utils import timeutils
+#from oslo_concurrency import lockutils
+from oslo.config import cfg
+from cinder.openstack.common import log as logging
+#from oslo_utils import timeutils
 import six
 import taskflow.engines
 from taskflow.patterns import linear_flow
@@ -35,7 +35,6 @@ from taskflow.utils import misc
 
 from cinder import exception
 from cinder.i18n import _, _LW, _LI, _LE
-from cinder import objects
 from cinder.volume.configuration import Configuration
 from cinder.volume.drivers.san import san
 from cinder.volume import manager
@@ -43,7 +42,7 @@ from cinder.volume import utils as vol_utils
 from cinder.volume import volume_types
 from cinder.zonemanager import utils as zm_utils
 from cinder import utils
-from cinder.volume.drivers.infortrend.eonstor_ds_cli import cli_factory as cli
+#from cinder.volume.drivers.infortrend.eonstor_ds_cli import cli_factory as cli
 
 LOG = logging.getLogger(__name__)
 
@@ -94,14 +93,14 @@ def log_enter_exit(func):
         LOG.debug("Entering %(cls)s.%(method)s",
                   {'cls': self.__class__.__name__,
                    'method': func.__name__})
-        start = timeutils.utcnow()
+        #start = timeutils.utcnow()
         ret = func(self, *args, **kwargs)
-        end = timeutils.utcnow()
+        #end = timeutils.utcnow()
         LOG.debug("Exiting %(cls)s.%(method)s. "
                   "Spent %(duration)s sec. "
                   "Return %(return)s",
                   {'cls': self.__class__.__name__,
-                   'duration': timeutils.delta_seconds(start, end),
+                   #'duration': timeutils.delta_seconds(start, end),
                    'method': func.__name__,
                    'return': ret})
         return ret
@@ -585,8 +584,8 @@ class CCFS3000Helper(object):
         self.active_storage_ip = self.configuration.san_ip
         self.storage_username = self.configuration.san_login
         self.storage_password = self.configuration.san_password
-        self.max_over_subscription_ratio = (
-            self.configuration.max_over_subscription_ratio)
+        #self.max_over_subscription_ratio = (
+        #    self.configuration.max_over_subscription_ratio)
         self.lookup_service_instance = None
         # Here we use group config to keep same as cinder manager
         zm_conf = Configuration(manager.volume_manager_opts)
@@ -734,7 +733,7 @@ class CCFS3000Helper(object):
         return self.storage_pools_map[name]
 
     def create_volume(self, volume):
-        name = volume['display_name']+'-'+volume['name']
+        name = str(volume['display_name'])+'-'+str(volume['name'])
         size = volume['size']
         #extra_specs = self._get_volumetype_extraspecs(volume)
         #k = 'storagetype:provisioning'
@@ -1138,8 +1137,8 @@ class CCFS3000Helper(object):
             raise exception.VolumeBackendAPIException(data=msg)
 
     def get_fc_zone_info_for_empty_host(self, connector, host_id):
-        @lockutils.synchronized('emc-vnxe-host-' + host_id,
-                                "emc-vnxe-host-", True)
+        #@lockutils.synchronized('emc-vnxe-host-' + host_id,
+        #                        "emc-vnxe-host-", True)
         def _get_fc_zone_info_in_sync():
             if self.isHostContainsLUNs(host_id):
                 return {}
@@ -1223,8 +1222,8 @@ class CCFS3000Helper(object):
             #'thin_provisioning_support': self.thin_enabled,
             'thin_provisioning_support': False,
             'thick_provisioning_support': True,
-            'consistencygroup_support': True,
-            'max_over_subscription_ratio': self.max_over_subscription_ratio
+            'consistencygroup_support': True
+            #'max_over_subscription_ratio': self.max_over_subscription_ratio
         }
         return pool_stats
 
@@ -1315,7 +1314,7 @@ class CCFS3000Driver(san.SanDriver):
     def create_snapshot(self, snapshot):
         """Creates a snapshot."""
         LOG.debug('Entering create_snapshot.')
-        snapshotname = snapshot['display_name']+'-'+snapshot['name']
+        snapshotname = str(snapshot['display_name'])+'-'+str(snapshot['name'])
         volumename = snapshot['volume_name']
         snap_desc = snapshot['display_description']
         LOG.info(_LI('Create snapshot: %(snapshot)s: volume: %(volume)s'),
@@ -1358,4 +1357,4 @@ class CCFS3000Driver(san.SanDriver):
         #    volume, existing_ref)
 
     def unmanage(self, volume):
-        pass
+        pass    

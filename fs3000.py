@@ -209,7 +209,9 @@ class CCFS3000RESTClient(object):
                 resp_body = http_err.read()
                 self._http_log_resp(http_err, resp_body, req)
                 if resp_body:
-                    err = json.loads(resp_body)['error']
+                    resp_json = json.loads(resp_body)
+                    resp_err = resp_json['error']
+                    err = resp_err if resp_err else resp_json
                 else:
                     err = {'errorCode': -1,
                            'httpStatusCode': http_err.code,
@@ -1331,7 +1333,6 @@ class CCFS3000Driver(san.SanDriver):
     def extend_volume(self, volume, new_size):
         return self.helper.extend_volume(volume, new_size)
 
-    @zm_utils.AddFCZone
     def initialize_connection(self, volume, connector):
         return self.helper.initialize_connection(volume, connector)
 

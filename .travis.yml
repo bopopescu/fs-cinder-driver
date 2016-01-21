@@ -11,5 +11,12 @@ git:
 before_script:
   - chmod +x ./run_test.sh
 
+notifications:
+  email:
+    recipients:
+      - frank@fortunet.com.cn
+      - chengy@fortunet.com.cn
+      - kevin@fortunet.com.cn
+
 script:
   - ./run_test.sh

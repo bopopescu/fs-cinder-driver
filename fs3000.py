@@ -378,7 +378,7 @@ class CCFS3000RESTClient(object):
         if protocol == 'FC':
             url_para = {'service' : 'FCLunMappingService',
                         'action' : 'echoUsedLunsByWWN',
-                        'wwn' : initiator}
+                        'wwn' : initiator.upper()}
         elif protocol == 'iSCSI':
             url_para = {'service' : 'LunMappingService',
                         'action' : 'echoUsedLunsByInitiator',
@@ -407,11 +407,11 @@ class CCFS3000RESTClient(object):
             LOG.debug("expose_lun lun_id %s init %s host_lun %s",
                 lun_id, initiator, host_lun)
             if protocol == 'FC':
-                    url_para = {'service' : 'FCLunMappingService',
-                                'action' : 'createFCLunMapping',
-                                'lvId' : lun_id,
-                                'lunNumber' : host_lun,
-                                'wwn' : initiator}
+                url_para = {'service' : 'FCLunMappingService',
+                            'action' : 'createFCLunMapping',
+                            'lvId' : lun_id,
+                            'lunNumber' : host_lun,
+                            'wwn' : initiator}
             elif protocol == 'iSCSI':
                 url_para = {'service' : 'LunMappingService',
                             'action' : 'createLunMappingWithChapUser',

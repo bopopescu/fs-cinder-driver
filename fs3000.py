@@ -210,7 +210,7 @@ class CCFS3000RESTClient(object):
                 self._http_log_resp(http_err, resp_body, req)
                 if resp_body:
                     resp_json = json.loads(resp_body)
-                    resp_err = resp_json['error']
+                    resp_err = resp_json['error'] if resp_json['error'] else None
                     err = resp_err if resp_err else resp_json
                 else:
                     err = {'errorCode': -1,

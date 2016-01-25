@@ -313,29 +313,16 @@ class CCFS3000RESTClient(object):
         err, resp = self.request(url_parameter)
         return resp
 
-    def create_lun(self, pool_id, name, size, **kwargs):
+    def create_lun(self, pool_id, name, size, lvtype):
         url_para = {'service' : 'LvService',
                     'action' : 'createLv',
                     'name' : name,
                     'vgId' : pool_id,
-                    'sizeGB' : size}
+                    'sizeGB' : size,
+		    'lvType' : lvtype}
         err, resp = self.request(url_para)
         return (err, None) if err else \
             (err, resp)
-
-        #lun_create_url = '/api/types/storageResource/action/createLun'
-        #lun_parameters = {'pool': {"id": pool_id},
-        #                  'isThinEnabled': True,
-        #                  'size': size}
-        #if 'is_thin' in kwargs:
-        #    lun_parameters['isThinEnabled'] = kwargs['is_thin']
-        # More Advance Feature
-        #data = {'name': name,
-        #        'description': name,
-        #        'lunParameters': lun_parameters}
-        #err, resp = self._request(lun_create_url, data)
-        #return (err, None) if err else \
-        #    (err, resp['content']['storageResource'])
 
     def delete_lun(self, lun_id, force_snap_deletion=False):
         url_para = {'service' : 'LvService',
@@ -471,6 +458,37 @@ class CCFS3000RESTClient(object):
                     'snapshotId' : snap_id}
         return self.request(url_para)
 
+    def create_lun_from_snap (self, name, snap_id):
+        url_para = {'service' : 'LvService',
+                    'action' : 'createLvFromSnapshot',
+                    'name' : name,
+                    'snapshotId' : snap_id}
+        return self.request(url_para)
+
+    def is_flatten_lun (self, lun_id):
+        url_para = {'service' : 'LvService',
+                    'action' : 'isFlattenLv',
+                    'lvId' : lun_id}
+        return self.request(url_para)
+
+    def flatten_lun (self, lun_id):
+        url_para = {'service' : 'LvService',
+                    'action' : 'flattenLv',
+                    'lvId' : lun_id}
+        return self.request(url_para)
+
+    def get_lun_or_snap_size (self, lun_or_snap_id):
+        url_para = {'service' : 'LvService',
+                    'action' : 'getLvRSize',
+                    'lvId' : lun_or_snap_id}
+        return self.request(url_para)
+
+    def rollback_to_snap (self, snap_id):
+        url_para = {'service' : 'LvService',
+                    'action' : 'doRollbackToSnapshot',
+                    'SnapId' : snap_id}
+        return self.request(url_para)
+
     def extend_lun(self, lun_id, size):
         url_para = {'service' : 'LvService',
                     'action' : 'doExpandLvSize',
@@ -578,6 +596,7 @@ class CCFS3000Helper(object):
         self.configuration.append_config_values(san.san_opts)
         self.storage_protocol = conf.storage_protocol
         self.supported_storage_protocols = ('iSCSI', 'FC')
+        self.lvtype = 4 #thin lv
         if self.storage_protocol not in self.supported_storage_protocols:
             msg = _('storage_protocol %(invalid)s is not supported. '
                     'The valid one should be among %(valid)s.') % {
@@ -739,38 +758,18 @@ class CCFS3000Helper(object):
     def create_volume(self, volume):
         name = str(volume['display_name'])+'-'+str(volume['name'])
         size = volume['size']
-        #extra_specs = self._get_volumetype_extraspecs(volume)
-        #k = 'storagetype:provisioning'
-        is_thin = False
-        #if k in extra_specs:
-        #    v = extra_specs[k].lower()
-        #    if v == 'thin':
-        #        is_thin = True
-        #    elif v == 'thick':
-        #        is_thin = False
-        #    else:
-        #        msg = _('Value %(v)s of %(k)s is invalid') % {'k': k, 'v': v}
-        #        LOG.error(msg)
-        #        raise exception.VolumeBackendAPIException(data=msg)
         err, resp = self.client.create_lun(
             self._get_target_storage_pool_id(volume), name, size,
-            is_thin=is_thin)
+            self.lvtype)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
 
         err, lun = self.client.get_lun_by_name(name)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
-	elif not lun:
-	    err_msg = 'can not get created LV by name %s' % name
+        elif not lun:
+            err_msg = 'can not get created LV by name %s' % name
             raise exception.VolumeBackendAPIException(data=err_msg)
-
-        #if volume.get('consistencygroup_id'):
-        #    cg_id = (
-        #        self._get_group_id_by_name(volume.get('consistencygroup_id')))
-        #    err, res = self.client.update_consistencygroup(cg_id, [lun['id']])
-        #    if err:
-        #        raise exception.VolumeBackendAPIException(data=err['messages'])
 
         pl_dict = {'system': self.storage_serial_number,
                    'type': 'lun',
@@ -779,6 +778,56 @@ class CCFS3000Helper(object):
                         self._dumps_provider_location(pl_dict)}
         volume['provider_location'] = model_update['provider_location']
         return model_update
+
+    def create_volume_from_snapshot(self, volume, snapshot):
+        name = volume['display_name']+'-'+volume['name']
+        snap_id = self._extra_lun_or_snap_id(snapshot)
+        if not snap_id: #TODO: add log message
+            return
+        err, resp = self.client.create_lun_from_snap(name, snap_id)
+        if err:
+            raise exception.VolumeBackendAPIException(data=err['messages'])
+
+        err, lun = self.client.get_lun_by_name(name)
+        if err:
+            raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not lun:
+            err_msg = 'can not get created LV by name %s' % name
+            raise exception.VolumeBackendAPIException(data=err_msg)
+
+        pl_dict = {'system': self.storage_serial_number,
+                   'type': 'lun',
+                   'id': lun['Id']}
+        model_update = {'provider_location':
+                        self._dumps_provider_location(pl_dict)}
+        volume['provider_location'] = model_update['provider_location']
+        return model_update
+
+    def is_flatten_volume(self, volume):
+        lun_id = self._extra_lun_or_snap_id(volume)
+        err, resp = self.client.is_flatten_lun(lun_id)
+        if err:
+            raise exception.VolumeBackendAPIException(data=err['messages'])
+        return resp
+
+    def flatten_volume(self, volume):
+        lun_id = self._extra_lun_or_snap_id(volume)
+        err, resp = self.client.flatten_lun(lun_id)
+        if err:
+            raise exception.VolumeBackendAPIException(data=err['messages'])
+
+    def get_volume_or_snapshot_size(self, volume):
+        lun_or_snap_id = self._extra_lun_or_snap_id(volume)
+        err, resp = self.client.get_lun_or_snap_size(lun_or_snap_id)
+        if err:
+            raise exception.VolumeBackendAPIException(data=err['messages'])
+        return resp
+
+    def rollback_to_snapshot(self, snapshot):
+        snap_id = self._extra_lun_or_snap_id(snapshot)
+        err, resp = self.client.rollback_to_snap(snap_id)
+        if err:
+            raise exception.VolumeBackendAPIException(data=err['messages'])
 
     def _extra_lun_or_snap_id(self, volume):
         if volume.get('provider_location') is None:
@@ -822,8 +871,7 @@ class CCFS3000Helper(object):
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not snap:
-	    err_msg = 'can not get snapshot %(name)s by lun_id %(lun_id)s' %\
-			{'name': name, 'lun_id': lun_id}
+            err_msg = 'can not get snapshot %(name)s by lun_id %(lun_id)s' % {'name': name, 'lun_id': lun_id}
             raise exception.VolumeBackendAPIException(data=err_msg)
 
         pl_dict = {'system': self.storage_serial_number,
@@ -837,21 +885,21 @@ class CCFS3000Helper(object):
     def delete_snapshot(self, snapshot):
         """Gets the snap id by the snap name and delete the snapshot."""
         snap_id = self._extra_lun_or_snap_id(snapshot)
-        if not snap_id:
+        if not snap_id:	#TODO: add log message
             return
         err, resp = self.client.delete_snap(snap_id)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
 
     def extend_volume(self, volume, new_size):
-	origin_size = volume['size']
-	if origin_size >= new_size:
-	    raise exception.VolumeBackendAPIException("New size for extend must be greater than current size. (current: %s, extended: %s)" % (origin_size, new_size))
-	extend_size = new_size - origin_size
+        origin_size = volume['size']
+        if origin_size >= new_size:
+            raise exception.VolumeBackendAPIException("New size for extend must be greater than current size. (current: %s, extended: %s)" % (origin_size, new_size))
+        extend_size = new_size - origin_size
         lun_id = self._extra_lun_or_snap_id(volume)
         err, resp = self.client.extend_lun(lun_id, extend_size)
         if err:
-	    raise exception.VolumeBackendAPIException(data=err['messages'])
+            raise exception.VolumeBackendAPIException(data=err['messages'])
 
     def _extract_iscsi_uids(self, connector):
         if 'initiator' not in connector:
@@ -1191,13 +1239,6 @@ class CCFS3000Helper(object):
 
     def update_volume_stats(self):
         LOG.debug("Updating volume stats")
-        # Check if thin provisioning license is installed
-        #licenses = self.client.get_licenses(('id', 'isValid'))
-        #thin_license = filter(lambda lic: (lic['id'] == 'VNXE_PROVISION'
-        #                                   and lic['isValid'] is True),
-        #                      licenses)
-        #if thin_license:
-        #    self.thin_enabled = True
         data = {}
         backend_name = self.configuration.safe_get('volume_backend_name')
         data['volume_backend_name'] = backend_name or 'CCFS3000Driver'
@@ -1292,29 +1333,44 @@ class CCFS3000Driver(san.SanDriver):
         pass
 
     def create_consistencygroup(self, context, group):
-	pass
+        pass
 
     def delete_consistencygroup(self, context, group):
-	pass
+        pass
 
     def update_consistencygroup(self, context, group,
                                 add_volumes=None, remove_volumes=None):
-	pass
+        pass
 
     def create_cgsnapshot(self, context, cgsnapshot):
-	pass
+        pass
 
     def delete_cgsnapshot(self, context, cgsnapshot):
-	pass
+        pass
 
     def create_volume(self, volume):
         return self.helper.create_volume(volume)
 
     def create_volume_from_snapshot(self, volume, snapshot):
-	pass
+        return self.helper.create_volume_from_snapshot(volume, snapshot)
+
+    def is_flatten_volume (self, volume):
+        return self.helper.is_flatten_volume(volume)
+
+    def flatten_volume (self, volume):
+        return self.helper.flatten_volume(volume)
+
+    def rollback_to_snapshot(self, snapshot):
+        return self.helper.rollback_to_snapshot(snapshot)
+
+    def get_volume_size (self, volume):
+        return self.helper.get_volume_or_snapshot_size(volume)
+
+    def get_snapshot_size (self, snapshot):
+        return self.helper.get_volume_or_snapshot_size(snapshot)
 
     def create_cloned_volume(self, volume, src_vref):
-	pass
+        pass
 
     def delete_volume(self, volume):
         return self.helper.delete_volume(volume)
@@ -1322,7 +1378,7 @@ class CCFS3000Driver(san.SanDriver):
     def create_snapshot(self, snapshot):
         """Creates a snapshot."""
         LOG.debug('Entering create_snapshot.')
-        snapshotname = str(snapshot['display_name'])+'-'+str(snapshot['name'])
+        snapshotname = snapshot['display_name']+'-'+snapshot['name']
         volumename = snapshot['volume_name']
         snap_desc = snapshot['display_description']
         LOG.info(_LI('Create snapshot: %(snapshot)s: volume: %(volume)s'),
@@ -1354,14 +1410,14 @@ class CCFS3000Driver(san.SanDriver):
 
     def manage_existing_get_size(self, volume, existing_ref):
         """Return size of volume to be managed by manage_existing."""
-	pass
+        pass
         #return self.helper.manage_existing_get_size(
         #    volume, existing_ref)
 
     def manage_existing(self, volume, existing_ref):
-	pass
+        pass
         #return self.helper.manage_existing(
         #    volume, existing_ref)
 
     def unmanage(self, volume):
-        pass    
+        pass

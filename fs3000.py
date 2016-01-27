@@ -1065,7 +1065,7 @@ class CCFS3000Helper(object):
         data['target_lun'] = host_lun
         if self.storage_protocol == 'iSCSI':
             err, target_iqns, target_portals =\
-		self._do_iscsi_discovery(self.active_storage_ip)
+                self._do_iscsi_discovery(self.active_storage_ip)
             data['target_iqn'] = target_iqns[0]
             data['target_portal'] = target_portals[0]
             # TODO kevin, for multi-connection
@@ -1201,7 +1201,7 @@ class CCFS3000Helper(object):
                                               targets)
         return {
             'driver_volume_type': self._get_driver_volume_type(),
-            'data': _get_fc_zone_info_in_sync()}
+            'data': self._build_initiator_target_map(connector)}
 
     def terminate_connection(self, volume, connector, **kwargs):
         lun_id = self._extra_lun_or_snap_id(volume)
@@ -1221,8 +1221,9 @@ class CCFS3000Helper(object):
         if self.storage_protocol == 'iSCSI':
             return
         elif self.storage_protocol == 'FC':
-            zone_info = self._build_initiator_target_map(connector)
-            LOG.debug("zone_info %s", zone_info)
+            zone_info = self.get_fc_zone_info_for_empty_host(connector, host_id)
+            LOG.debug("termi_conn zone_info %s", zone_info)
+            return zone_info
 
     def isHostContainsLUNs(self, host_id):
         host = self.client.get_host_by_id(host_id, ('hostLUNs',))

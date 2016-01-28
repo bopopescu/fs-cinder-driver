@@ -256,10 +256,14 @@ class CCFS3000RESTClient(object):
 
     def request (self, url_para):
         err, resp = self._login()
-	if not err:
-	    rel_url = self._getRelURL(url_para)
-	    err, resp = self._request(rel_url)
-	    self._logout()
+        if err:
+            LOG.warning('request: login failed.')
+        elif 'code' in resp:
+            LOG.warning('request: login with err %s' % resp['code'])
+        else:
+            rel_url = self._getRelURL(url_para)
+            err, resp = self._request(rel_url)
+            self._logout()
         return err, resp
 
     def get_pools(self, fields=None):

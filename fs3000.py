@@ -757,6 +757,9 @@ class CCFS3000Helper(object):
         name = self._get_target_storage_pool_name(volume)
         return self.storage_pools_map[name]
 
+    def _api_exec_success (self, resp):
+	return True if resp['code'] == 0 else False
+
     def create_volume(self, volume):
         name = str(volume['display_name'])+'-'+str(volume['name'])
         size = volume['size']
@@ -765,6 +768,9 @@ class CCFS3000Helper(object):
             self.lvtype)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not self._api_exec_success(resp):
+            err_msg = 'create volume %s failed with err %s.' % (volume['name'], resp['code'])
+            raise exception.VolumeBackendAPIException(data=err_msg)
 
         err, lun = self.client.get_lun_by_name(name)
         if err:
@@ -789,6 +795,9 @@ class CCFS3000Helper(object):
         err, resp = self.client.create_lun_from_snap(name, snap_id)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not self._api_exec_success(resp):
+            err_msg = 'create volume %s from snapshot %s/%s failed with err %s.' % (volume['name'], snapshot['name'], snap_id, resp['code'])
+            raise exception.VolumeBackendAPIException(data=err_msg)
 
         err, lun = self.client.get_lun_by_name(name)
         if err:
@@ -810,6 +819,10 @@ class CCFS3000Helper(object):
         err, resp = self.client.is_flatten_lun(lun_id)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif type(resp) is not bool:
+            err_msg = 'is flatten volume api fail. id %s resp %s' % (lun_id, resp)
+            raise exception.VolumeBackendAPIException(data=err_msg)
+
         return resp
 
     def flatten_volume(self, volume):
@@ -817,19 +830,30 @@ class CCFS3000Helper(object):
         err, resp = self.client.flatten_lun(lun_id)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not self._api_exec_success(resp):
+            err_msg = 'flatten volume %s/%s failed with err %s.' % (volume['name'], lun_id, resp['code'])
+            raise exception.VolumeBackendAPIException(data=err_msg)
 
     def get_volume_or_snapshot_size(self, volume):
         lun_or_snap_id = self._extra_lun_or_snap_id(volume)
         err, resp = self.client.get_lun_or_snap_size(lun_or_snap_id)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
-        return resp
+        elif resp < 0:
+            err_msg = 'can not get volume/snapshot size by id %s err %s' % (lun_or_snap_id, resp)
+            raise exception.VolumeBackendAPIException(data=err_msg)
+
+        size_gb = resp/1024/1024/1024
+        return size_gb
 
     def rollback_to_snapshot(self, snapshot):
         snap_id = self._extra_lun_or_snap_id(snapshot)
         err, resp = self.client.rollback_to_snap(snap_id)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not self._api_exec_success(resp):
+            err_msg = 'rollback to snapshot %s/%s failed with err %s.' % (snapshot['name'], snap_id, resp['code'])
+            raise exception.VolumeBackendAPIException(data=err_msg)
 
     def _extra_lun_or_snap_id(self, volume):
         if volume.get('provider_location') is None:
@@ -854,6 +878,9 @@ class CCFS3000Helper(object):
                             {'name': volume['name'], 'msg': err['messages']})
             else:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not self._api_exec_success(resp):
+            err_msg = 'delete volume %s/%s failed with err %s.' % (volume['name'], lun_id, resp['code'])
+            raise exception.VolumeBackendAPIException(data=err_msg)
 
     def create_snapshot(self, snapshot, name, snap_desc):
         """This function will create a snapshot of the given volume."""
@@ -868,6 +895,9 @@ class CCFS3000Helper(object):
             lun_id, name, lun_size, snap_desc)
 	if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not self._api_exec_success(resp):
+            err_msg = 'create snapshot from volume %s/%s failed with err %s.' % (snapshot['volume']['name'], lun_id, resp['code'])
+            raise exception.VolumeBackendAPIException(data=err_msg)
 
         err, snap = self.client.get_snap_by_name(lun_id, name)
         if err:
@@ -892,6 +922,9 @@ class CCFS3000Helper(object):
         err, resp = self.client.delete_snap(snap_id)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not self._api_exec_success(resp):
+            err_msg = 'delete snapshot %s/%s failed with err %s.' % (snapshot['name'], snap_id, resp['code'])
+            raise exception.VolumeBackendAPIException(data=err_msg)
 
     def extend_volume(self, volume, new_size):
         origin_size = volume['size']
@@ -902,6 +935,9 @@ class CCFS3000Helper(object):
         err, resp = self.client.extend_lun(lun_id, extend_size)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not self._api_exec_success(resp):
+            err_msg = 'extend volume %s/%s failed with err %s.' % (volume['name'], lun_id, resp['code'])
+            raise exception.VolumeBackendAPIException(data=err_msg)
 
     def _extract_iscsi_uids(self, connector):
         if 'initiator' not in connector:

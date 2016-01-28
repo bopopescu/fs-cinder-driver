@@ -1286,6 +1286,10 @@ class CCFS3000Helper(object):
         data['vendor_name'] = "Fortunet"
 
         pools = self.client.get_pools()
+        if not pools:
+            LOG.warning(_LW('update volum stats: can not get pools'))
+            return self.stats
+
         if not self.is_managing_all_pools:
             pools = filter(lambda a: a['Name'] in self.storage_pools_map,
                            pools)

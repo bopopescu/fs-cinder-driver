@@ -380,8 +380,7 @@ class CCFS3000RESTClient(object):
         err, resp = self._request(initiator_register_url, data)
         return err, resp
 
-    def get_host_lun_by_ends(self, host_id, lun_id,
-                             protocol):
+    def get_all_lun_map(self, host_id, lun_id, protocol):
         if protocol == 'FC':
             url_para = {'service' : 'FCLunMappingService',
                         'action' : 'getAllFCLunMappings'}
@@ -389,13 +388,9 @@ class CCFS3000RESTClient(object):
             url_para = {'service' : 'LunMappingService',
                         'action' : 'getAllFS3000LunMappings'}
         err, resp = self.request(url_para)
+        return err, resp
 
-        LOG.debug("lun map %s", resp)
-        for mapping in resp:
-            if (mapping['lvId'] == lun_id):
-                return mapping['lunNumber']
-
-    def _get_avail_host_lun(self, protocol, initiator):
+    def get_used_luns(self, protocol, initiator):
         if protocol == 'FC':
             url_para = {'service' : 'FCLunMappingService',
                         'action' : 'echoUsedLunsByWWN',
@@ -404,52 +399,26 @@ class CCFS3000RESTClient(object):
             url_para = {'service' : 'LunMappingService',
                         'action' : 'echoUsedLunsByInitiator',
                         'initiator' : initiator}
-        else:
-            msg = _('storage_protocol %(invalid)s is not supported. '
-                    ) % {'invalid': protocol}
-            LOG.error(msg)
-            raise exception.VolumeBackendAPIException(data=msg)
-
         err, resp = self.request(url_para)
+        return err, resp
 
-        host_lun = 0
-        resp.sort()
-        for used_lun in resp:
-            if (host_lun == int(used_lun)):
-                host_lun += 1
-        
-        LOG.debug("take host_lun %s, used_lun %s",host_lun, resp)
-        return host_lun
-
-    def expose_lun(self, lun_id, initiators, protocol):
-        for initiator in initiators:
-            host_lun = self._get_avail_host_lun(protocol, initiator)
-            LOG.debug("expose_lun lun_id %s init %s host_lun %s",
-                lun_id, initiator, host_lun)
-            if protocol == 'FC':
-                url_para = {'service' : 'FCLunMappingService',
-                            'action' : 'createFCLunMapping',
-                            'lvId' : lun_id,
-                            'lunNumber' : host_lun,
-                            'wwn' : initiator}
-            elif protocol == 'iSCSI':
-                url_para = {'service' : 'LunMappingService',
-                            'action' : 'createLunMappingWithChapUser',
-                            'lvId' : lun_id,
-                            'lunNumber' : host_lun,
-                            'initiator' : initiator}
-            else:
-                msg = _('storage_protocol %(invalid)s is not supported. '
-                        ) % {'invalid': protocol}
-                LOG.error(msg)
-                raise exception.VolumeBackendAPIException(data=msg)
-            err, resp = self.request(url_para)
+    def expose_lun(self, lun_id, host_lun, initiators, protocol):
+        if protocol == 'FC':
+            url_para = {'service' : 'FCLunMappingService',
+                        'action' : 'createFCLunMapping',
+                        'lvId' : lun_id,
+                        'lunNumber' : host_lun,
+                        'wwn' : initiator}
+        elif protocol == 'iSCSI':
+            url_para = {'service' : 'LunMappingService',
+                        'action' : 'createLunMappingWithChapUser',
+                        'lvId' : lun_id,
+                        'lunNumber' : host_lun,
+                        'initiator' : initiator}
+        err, resp = self.request(url_para)
         return err, resp
 
     def hide_lun(self, lun_id, host_id, protocol):
-        LOG.debug("hide_lun lun_id %s, host_id %s, proto %s",
-            lun_id, host_id, protocol)
-        host_lun = self.get_host_lun_by_ends(host_id, lun_id, protocol)
         if protocol == 'FC':
             url_para = {'service' : 'FCLunMappingService',
                         'action' : 'deleteFCLunMapping',
@@ -461,7 +430,7 @@ class CCFS3000RESTClient(object):
                         'lunNumber' : host_lun,
                         'initiator' : host_id}
         err, resp = self.request(url_para)
-        return err,resp
+        return err, resp
 
     def create_snap(self, lun_id, snap_name, lun_size, snap_description=None):
         url_para = {'service' : 'LvService',
@@ -573,8 +542,7 @@ class ExposeLUNTask(task.Task):
             return
         else:
             LOG.warning(_LW('ExposeLUNTask.revert: hide_lun'))
-            for initiator in host_id:
-                self.helper.hide_lun(self.volume, self.lun_data, host_id)
+            self.helper.hide_lun(self.volume, self.lun_data, host_id)
 
 
 class GetConnectionInfoTask(task.Task):
@@ -1066,7 +1034,6 @@ class CCFS3000Helper(object):
         return target_wwns, init_targ_map
 
     def arrange_host(self, connector):
-        # TODO kevin, single WWPNS now
         if self.storage_protocol == 'FC':
             host_id = connector['wwpns']
         elif self.storage_protocol == 'iSCSI':
@@ -1079,17 +1046,35 @@ class CCFS3000Helper(object):
 
         return host_id
 
-    def expose_lun(self, volume, lun_data, host_id):
-        LOG.debug('expose_lun, v %s, lun %s, hostid %s',
-            volume, lun_data, host_id)
-        lun_id = lun_data['Id']
-        err, resp = self.client.expose_lun(lun_id, host_id, 
-                        self.storage_protocol)
+    def expose_lun(self, volume, lun_data, initiators):
+        for initiator in initiators:
+            err, resp = self.client.get_used_luns(self.protocol, initiator)
+            if err:
+                raise exception.VolumeBackendAPIException(data=err['messages'])
+            elif not self._api_exec_success(resp):
+                err_msg = _('get_used_luns (%s %s) failed with err %s.' %
+                            (self.protocol, initiator, resp['code']))
+                raise exception.VolumeBackendAPIException(data=err_msg)
 
-        if err:
-            msg = _('expose_lun error %s.') % err
-            LOG.error(msg)
-            raise exception.VolumeBackendAPIException(data=msg)
+            host_lun = 0
+            resp.sort()
+            for used_lun in resp:
+                if (host_lun == int(used_lun)):
+                    host_lun += 1
+            LOG.debug("expose_lun lun_id %s init %s host_lun %s",
+                lun_id, initiator, host_lun)
+            lun_id = lun_data['Id']
+            err, resp = self.client.expose_lun(lun_id, host_id, host_lun,
+                            self.storage_protocol)
+            if err:
+                raise exception.VolumeBackendAPIException(data=err['messages'])
+            elif not self._api_exec_success(resp):
+                err_msg = _('%s createLunMapping(%s %s %s) failed with err %s.' %
+                        (protocol, lun_id, host_lun, initiator, resp['code']))
+                raise exception.VolumeBackendAPIException(data=err_msg)
+
+            LOG.debug("exposed_lun lun_id %s init %s host_lun %s",
+                lun_id, initiator, host_lun)
 
     def _get_driver_volume_type(self):
         if self.storage_protocol == 'iSCSI':
@@ -1100,6 +1085,7 @@ class CCFS3000Helper(object):
             return 'unknown'
 
     def _get_fc_zone_info(self, connector, targets):
+
         initiator_wwns = connector['wwpns']
         target_wwns = [item[1] for item in targets]
         mapping = self.lookup_service_instance.\
@@ -1109,6 +1095,27 @@ class CCFS3000Helper(object):
         return {'initiator_target_map': init_targ_map,
                 'target_wwn': target_wwns}
 
+    def get_host_lun(self, initiator, lun_id, protocol):
+
+        err, resp = self.client.get_all_lun_map(initiator, lun_id, protocol)
+        if err:
+            raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not self._api_exec_success(resp):
+            err_msg = _('get_all_lun_map (%s %s %s) failed with err %s' % 
+                (initiator, lun_id, protocol, resp['code']))
+            raise exception.VolumeBackendAPIException(data=err_msg)
+
+        LOG.debug("all lun map %s", resp)
+        host_lun = -1
+        for mapping in resp:
+            if (mapping['lvId'] == lun_id):
+                host_lun = mapping['lunNumber']
+                return host_lun
+
+        err_msg = _('get_all_lun_map (%s %s %s) cant find host_lun' % 
+            (initiator, lun_id, protocol))
+        raise exception.VolumeBackendAPIException(data=err_msg)
+
     def get_connection_info(self, volume, connector,
                             lun_id, host_id):
 
@@ -1116,22 +1123,22 @@ class CCFS3000Helper(object):
                 'target_lun': 'unknown',
                 'volume_id': volume['id']}
 
-        host_lun = self.client.get_host_lun_by_ends(host_id, lun_id, 
-                                                    self.storage_protocol)
+        host_lun = self.get_host_lun(host_id, lun_id, self.storage_protocol)
         data['target_lun'] = host_lun
         if self.storage_protocol == 'iSCSI':
             err, target_iqns, target_portals =\
                 self._do_iscsi_discovery(self.active_storage_ip)
             data['target_iqn'] = target_iqns[0]
             data['target_portal'] = target_portals[0]
-            # TODO kevin, for multi-connection
-            #data['target_iqns'] = target_iqns
-            #data['target_portals'] = target_portals
-            #data['target_luns'] = [host_lun[0]['hlu']] * len(targets)
+            # TODO kevin, for iSCSI multipath
+            #if ( multipath ):
+            #    data['target_iqns'] = target_iqns
+            #    data['target_portals'] = target_portals
+            #    data['target_luns'] = [host_lun] * len(targets)
         elif self.storage_protocol == 'FC':
             zone_info = self._build_initiator_target_map(connector)
-            LOG.debug("zone_info %s", zone_info)
             data.update(zone_info)
+            LOG.debug("zone_info %s", zone_info)
 
         connection_info = {
             'driver_volume_type': self._get_driver_volume_type(),
@@ -1208,7 +1215,7 @@ class CCFS3000Helper(object):
                 target_wwns.append(str(wwn))
             init_targ_map[str(initiator).upper()] = active_wwns
 
-        LOG.debug("initiator_target_map %s, target_wwn %s", init_targ_map, target_wwns)
+        LOG.debug("init_targ_map %s target_wwns %s", init_targ_map, target_wwns)
         return {'initiator_target_map': init_targ_map,
                 'target_wwn': target_wwns}
 
@@ -1217,7 +1224,8 @@ class CCFS3000Helper(object):
         flow_name = 'initialize_connection'
         volume_flow = linear_flow.Flow(flow_name)
         lun_id = self._extra_lun_or_snap_id(volume)
-        err, lun_data = self.client.get_lun_by_id(lun_id)
+        lun_data = self.get_lun_by_id(lun_id)
+        multipath = connector.get('multipath', False)
         volume_flow.add(ArrangeHostTask(self, connector),
                         ExposeLUNTask(self, volume, lun_data),
                         GetConnectionInfoTask(self, volume, lun_data,
@@ -1229,21 +1237,20 @@ class CCFS3000Helper(object):
         return json.loads(flow_engine.storage.fetch('connection_info'))
 
     def hide_lun(self, volume, lun_data, host_id):
-        lun_id = lun_data['Id']
-        err, resp = self.client.hide_lun(lun_id,
-                                         host_id,
-                                         self.storage_protocol)
-        if err:
-            if err['errorCode'] in (0x6701020,):
-                LOG.warning(_LW('LUN %(lun)s backing %(vol) had been '
-                                'hidden from %(host)s.'), {
-                            'lun': lun_id, 'vol': lun_data['name'],
-                            'host': host_id})
-                return
-            msg = _('Failed to hide %(vol)s from host %(host)s '
-                    ': %(msg)s.') % {'vol': lun_data['name'],
-                                     'host': host_id, 'msg': resp}
-            raise exception.VolumeBackendAPIException(data=msg)
+
+        for initiator in host_id:
+            lun_id = lun_data['Id']
+            host_lun = self.get_host_lun(initiator, lun_id, protocol)
+
+            err, resp = self.client.hide_lun(lun_id, initiator, host_lun,
+                            self.storage_protocol)
+            if err:
+                raise exception.VolumeBackendAPIException(data=err['messages'])
+            elif not self._api_exec_success(resp):
+                err_msg = ('hide_lun (%s %s %s %s) failed with err %s.' % 
+                    (lun_id, initiator, host_lun, self.storage_protocol,
+                     resp['code']))
+                raise exception.VolumeBackendAPIException(data=err_msg)
 
     def get_fc_zone_info_for_empty_host(self, connector, host_id):
         #@lockutils.synchronized('emc-vnxe-host-' + host_id,
@@ -1261,24 +1268,22 @@ class CCFS3000Helper(object):
 
     def terminate_connection(self, volume, connector, **kwargs):
         lun_id = self._extra_lun_or_snap_id(volume)
-        #kevin TODO, TBD for multi-conn
+        multipath = connector.get('multipath', False)
         if self.storage_protocol == 'FC':
             host_id = connector['wwpns']
         elif self.storage_protocol == 'iSCSI':
             host_id = connector['initiator']
 
-        err, lun_data = self.client.get_lun_by_id(lun_id)
-        LOG.debug("terminate_conn lun_id %s, host_id %s, lun_data %s",
-            lun_id, host_id, lun_data)
-
-        for initiator in host_id:
-            self.hide_lun(volume, lun_data, initiator)
+        lun_data = self.get_lun_by_id(lun_id)
+        LOG.debug("term_conn lun_id %s, host_id %s, lun_data %s",
+                lun_id, host_id, lun_data)
+        self.hide_lun(volume, lun_data, host_id)
 
         if self.storage_protocol == 'iSCSI':
             return
         elif self.storage_protocol == 'FC':
             zone_info = self.get_fc_zone_info_for_empty_host(connector, host_id)
-            LOG.debug("termi_conn zone_info %s", zone_info)
+            LOG.debug("term_conn zone_info %s", zone_info)
             return zone_info
 
     def isHostContainsLUNs(self, host_id):

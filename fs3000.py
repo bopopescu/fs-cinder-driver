@@ -389,12 +389,6 @@ class CCFS3000RESTClient(object):
             url_para = {'service' : 'LunMappingService',
                         'action' : 'getAllFS3000LunMappings'}
         err, resp = self.request(url_para)
-        if err:
-            raise exception.VolumeBackendAPIException(data=err['messages'])
-        elif not self._api_exec_success(resp):
-            err_msg = 'getAllLunMapping %s failed with err %s.' % 
-                    (protocol, resp['code'])
-            raise exception.VolumeBackendAPIException(data=err_msg)
 
         LOG.debug("lun map %s", resp)
         for mapping in resp:
@@ -417,11 +411,6 @@ class CCFS3000RESTClient(object):
             raise exception.VolumeBackendAPIException(data=msg)
 
         err, resp = self.request(url_para)
-        if err:
-            raise exception.VolumeBackendAPIException(data=err['messages'])
-        elif not self._api_exec_success(resp):
-            err_msg = 'get host lun %s failed with err %s.' % (initiator, resp['code'])
-            raise exception.VolumeBackendAPIException(data=err_msg)
 
         host_lun = 0
         resp.sort()
@@ -455,12 +444,6 @@ class CCFS3000RESTClient(object):
                 LOG.error(msg)
                 raise exception.VolumeBackendAPIException(data=msg)
             err, resp = self.request(url_para)
-            if err:
-                raise exception.VolumeBackendAPIException(data=err['messages'])
-            elif not self._api_exec_success(resp):
-                err_msg = '%s createLunMaping(%s %s %s) failed with err %s.' % 
-                        (protocol, lun_id, host_lun, initiator, resp['code'])
-                raise exception.VolumeBackendAPIException(data=err_msg)
         return err, resp
 
     def hide_lun(self, lun_id, host_id, protocol):
@@ -478,12 +461,6 @@ class CCFS3000RESTClient(object):
                         'lunNumber' : host_lun,
                         'initiator' : host_id}
         err, resp = self.request(url_para)
-        if err:
-            raise exception.VolumeBackendAPIException(data=err['messages'])
-        elif not self._api_exec_success(resp):
-            err_msg = 'hide_lun (%s %s %s) failed with err %s.' % 
-                    (protocol, host_lun, host_id, resp['code'])
-            raise exception.VolumeBackendAPIException(data=err_msg)
         return err,resp
 
     def create_snap(self, lun_id, snap_name, lun_size, snap_description=None):

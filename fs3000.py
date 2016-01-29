@@ -122,7 +122,7 @@ class CCFS3000RESTClient(object):
         self.username = user
         self.password = password
         self.mgmt_url = 'https://%(host)s:%(port)s' % {'host': host,
-						       'port': port}
+                                                       'port': port}
         self.debug = debug
         self.cookie_jar = cookielib.CookieJar()
         self.cookie_handler = urllib2.HTTPCookieProcessor(self.cookie_jar)
@@ -185,8 +185,8 @@ class CCFS3000RESTClient(object):
         for key, value in parameter.items() :
             strPara += "&%(key)s=%(value)s" % {'key' : key, 'value' : value}
         strURL = "/serviceHandler.php?" + strPara
-	if self.debug:
-	    LOG.debug("_getRelURL = %s" % strURL)
+        if self.debug:
+            LOG.debug("_getRelURL = %s" % strURL)
         return strURL
 
     def _request(self, rel_url, req_data=None, method=None,
@@ -239,34 +239,54 @@ class CCFS3000RESTClient(object):
         login_rel = self._getRelURL(url_parameter)
         err, resp = self._request(login_rel)
 
-	if not err:
-	    php_session_id = None
-	    for cookie in self.cookie_jar:
-		if cookie.name == "PHPSESSID":
-		    php_session_id = cookie.value
-		    break
-	    cookie_content = 'PHPSESSID=%s'%php_session_id
-	    self.url_opener.addheaders.append(('Cookie', cookie_content))
-	return err, resp
+        if not err:
+            php_session_id = None
+            for cookie in self.cookie_jar:
+                if cookie.name == "PHPSESSID":
+                    php_session_id = cookie.value
+                    break
+            cookie_content = 'PHPSESSID=%s'%php_session_id
+            self.url_opener.addheaders.append(('Cookie', cookie_content))
+        return err, resp
+
+    def _is_login(self):
+        url_parameter = {'service' : 'LoginService',
+                         'action' : 'echoIsLogin'}
+        return self._request(self._getRelURL(url_parameter))
 
     def _logout(self):
         url_parameter = {'service' : 'LoginService',
                          'action' : 'logout'}
-	self._request(self._getRelURL(url_parameter))
+        self._request(self._getRelURL(url_parameter))
 
     def request (self, url_para):
-        err, resp = self._login()
-	if not err:
-	    rel_url = self._getRelURL(url_para)
-	    err, resp = self._request(rel_url)
-	    self._logout()
+        err, resp = self._is_login()
+        if err: 
+            LOG.warning('request: check is login failed.')
+            return err, resp
+        elif 'login' in resp:
+            if resp['login']=='false':
+                err, resp = self._login()
+                if err: 
+                    LOG.warning('request: login failed.')
+                    return err, resp
+                elif 'code' in resp:
+                    LOG.warning('request: login with err %s' % resp['code'])
+                    return err, resp
+        else:
+            LOG.warning('request: check is login resp without login parameter')
+            return err, resp
+
+        rel_url = self._getRelURL(url_para)
+        err, resp = self._request(rel_url)
+        #self._logout()
         return err, resp
 
     def get_pools(self, fields=None):
         url_parameter = {'service' : 'VgService',
                          'action' : 'getAllVGs'}
         err, pools = self.request(url_parameter)
-	return pools if not err else None
+        return pools if not err else None
 
     def get_luns(self):
         url_parameter = {'service' : 'LvService',
@@ -275,19 +295,19 @@ class CCFS3000RESTClient(object):
 
     def get_lun_by_name(self, name):
         err, luns = self.get_luns()
-	if not err:
-	    for lun in luns :
-		if lun['Name'] == name:
-		    return err, lun
-	return err, None
+        if not err:
+            for lun in luns :
+                if lun['Name'] == name:
+                    return err, lun
+        return err, None
 
     def get_lun_by_id(self, lun_id):
         err, luns = self.get_luns()
         if not err:
-	    for lun in luns :
-	        if lun['Id'] == lun_id:
-		    return err, lun
-	return err, None
+            for lun in luns :
+                if lun['Id'] == lun_id:
+                    return err, lun
+        return err, None
                 
     def get_snaps_by_lunid(self, lun_id):
         url_parameter = {'service' : 'LvService',
@@ -297,10 +317,10 @@ class CCFS3000RESTClient(object):
 
     def get_snap_by_name (self, lun_id, snapname):
         err, snaps = self.get_snaps_by_lunid(lun_id)
-	if not err:
-	    for snap in snaps :
-		if snap['Name'] == snapname:
-		    return err, snap
+        if not err:
+            for snap in snaps :
+                if snap['Name'] == snapname:
+                    return err, snap
         return err, None
 
     def get_system_info(self):
@@ -321,7 +341,7 @@ class CCFS3000RESTClient(object):
                     'name' : name,
                     'vgId' : pool_id,
                     'sizeGB' : size,
-		    'lvType' : lvtype}
+                    'lvType' : lvtype}
         err, resp = self.request(url_para)
         return (err, None) if err else \
             (err, resp)
@@ -779,7 +799,7 @@ class CCFS3000Helper(object):
         return self.storage_pools_map[name]
 
     def _api_exec_success (self, resp):
-	return True if resp['code'] == 0 else False
+        return True if resp['code'] == 0 else False
 
     def create_volume(self, volume):
         name = str(volume['display_name'])+'-'+str(volume['name'])
@@ -914,7 +934,7 @@ class CCFS3000Helper(object):
             raise exception.VolumeBackendAPIException(data=msg)
         err, resp = self.client.create_snap(
             lun_id, name, lun_size, snap_desc)
-	if err:
+        if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not self._api_exec_success(resp):
             err_msg = 'create snapshot from volume %s/%s failed with err %s.' % (snapshot['volume']['name'], lun_id, resp['code'])
@@ -1087,7 +1107,7 @@ class CCFS3000Helper(object):
             volume, lun_data, host_id)
         lun_id = lun_data['Id']
         err, resp = self.client.expose_lun(lun_id, host_id, 
-			self.storage_protocol)
+                        self.storage_protocol)
 
         if err:
             msg = _('expose_lun error %s.') % err
@@ -1120,7 +1140,7 @@ class CCFS3000Helper(object):
                 'volume_id': volume['id']}
 
         host_lun = self.client.get_host_lun_by_ends(host_id, lun_id, 
-			self.storage_protocol)
+                                                    self.storage_protocol)
         data['target_lun'] = host_lun
         if self.storage_protocol == 'iSCSI':
             err, target_iqns, target_portals =\
@@ -1205,7 +1225,7 @@ class CCFS3000Helper(object):
 
         initiator_wwns = connector['wwpns']
         for initiator in initiator_wwns:
-	    active_wwns = self.client.get_active_fc_wwns(str(initiator).upper())
+            active_wwns = self.client.get_active_fc_wwns(str(initiator).upper())
             active_wwns =(self._convert_wwns_fs3000_to_openstack(active_wwns))
             for wwn in active_wwns:
                 target_wwns.append(str(wwn))
@@ -1307,6 +1327,10 @@ class CCFS3000Helper(object):
         data['vendor_name'] = "Fortunet"
 
         pools = self.client.get_pools()
+        if not pools:
+            LOG.warning(_LW('update volum stats: can not get pools'))
+            return self.stats
+
         if not self.is_managing_all_pools:
             pools = filter(lambda a: a['Name'] in self.storage_pools_map,
                            pools)

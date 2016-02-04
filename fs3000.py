@@ -60,7 +60,10 @@ loc_opts = [
     cfg.StrOpt('storage_protocol',
                default='iSCSI',
                help='Protocol to access the storage '
-                    'allocated from this Cinder backend')]
+                    'allocated from this Cinder backend'),
+    cfg.StrOpt('san_secondary_ip',
+               default=None,
+               help='Storage slave ip.')]
 
 CONF.register_opts(loc_opts)
 
@@ -118,15 +121,30 @@ class CCFS3000RESTClient(object):
     HostLUNAccessEnum_NoAccess = 0
     HostLUNAccessEnum_Production = 1
 
-    def __init__(self, host, port=443, user='', password='', debug=False):
+    def __init__(self, master_ip, slave_ip, port=443, user='', password='', debug=False):
         self.username = user
         self.password = password
-        self.mgmt_url = 'https://%(host)s:%(port)s' % {'host': host,
+        self.active_storage_ip = master_ip
+        self.slave_storage_ip = slave_ip
+        self.port = port
+        LOG.info('init active storate ip %s, slave storage ip %s' % (master_ip, slave_ip))
+        self.mgmt_url = 'https://%(host)s:%(port)s' % {'host': master_ip,
                                                        'port': port}
         self.debug = debug
         self.cookie_jar = cookielib.CookieJar()
         self.cookie_handler = urllib2.HTTPCookieProcessor(self.cookie_jar)
         self.url_opener = urllib2.build_opener(self.cookie_handler)
+
+    def get_active_storage_ip (self):
+        return self.active_storage_ip
+
+    def get_slave_storage_ip (self):
+        return self.slave_storage_ip
+
+    def set_slave_storage_ip (self, slave_ip):
+        if self.slave_storage_ip != slave_ip:
+            LOG.info('set slave storage ip %s' % slave_ip)
+        self.slave_storage_ip = slave_ip
 
     def _http_log_req(self, req):
         if not self.debug:
@@ -190,11 +208,11 @@ class CCFS3000RESTClient(object):
         return strURL
 
     def _request(self, rel_url, req_data=None, method=None,
-                 return_rest_err=True):
+                 return_rest_err=True, assign_url=None):
         req_body = None if req_data is None else json.dumps(req_data)
         err = None
         resp_data = None
-        url = self.mgmt_url + rel_url
+        url = self.mgmt_url + rel_url if not assign_url else assign_url + rel_url
         req = urllib2.Request(url, req_body, CCFS3000RESTClient.HEADERS)
         if method not in (None, 'GET', 'POST'):
             req.get_method = lambda: method
@@ -226,18 +244,21 @@ class CCFS3000RESTClient(object):
                        'httpStatusCode': http_err.code,
                        'messages': six.text_type(http_err),
                        'request': req}
-
+        except Exception as ex:
+            LOG.warning('_request: Exception %s' % ex)
+            err = ex
+        finally:
             if not return_rest_err:
                 raise exception.VolumeBackendAPIException(data=err)
-        return (err, resp_data) if return_rest_err else resp_data
+            return (err, resp_data) if return_rest_err else resp_data
 
-    def _login(self):
+    def _login(self, assign_url=None):
         url_parameter = {'service' : 'LoginService',
                          'action' : 'login',
                          'account' : self.username,
                          'password' : self.password}
         login_rel = self._getRelURL(url_parameter)
-        err, resp = self._request(login_rel)
+        err, resp = self._request(login_rel, assign_url=assign_url)
 
         if not err:
             php_session_id = None
@@ -259,6 +280,28 @@ class CCFS3000RESTClient(object):
                          'action' : 'logout'}
         self._request(self._getRelURL(url_parameter))
 
+    def request_ha (req):
+        def ha_inner(self, *args, **kwargs):
+            err, resp = req(self, *args, **kwargs)
+            if err and self.slave_storage_ip:
+                LOG.debug('request ha: try slave storage')
+                try_ha_url = 'https://%(host)s:%(port)s' % {'host': self.slave_storage_ip,
+                                                            'port': self.port}
+                try_login_err, try_login_resp = self._login(assign_url=try_ha_url)
+                if not try_login_err:
+                    if 'permission' in try_login_resp:
+                        LOG.info('request ha: active storage ip change to %s' % self.slave_storage_ip)
+                        self.active_storage_ip, self.slave_storage_ip = self.slave_storage_ip, self.active_storage_ip
+                        self.mgmt_url = try_ha_url
+                        url_para = args[0]
+                        rel_url = self._getRelURL(url_para)
+                        err, resp = self._request(rel_url)
+                    elif 'code' in try_login_resp:
+                        LOG.warning('request ha: login with err %s' % try_loginresp['code'])
+            return err, resp
+        return ha_inner
+
+    @request_ha
     def request (self, url_para):
         err, resp = self._is_login()
         if err: 
@@ -592,7 +635,8 @@ class CCFS3000Helper(object):
                 'valid': self.supported_storage_protocols}
             LOG.error(msg)
             raise exception.VolumeBackendAPIException(data=msg)
-        self.active_storage_ip = self.configuration.san_ip
+        self.config_master_ip = self.configuration.san_ip
+        self.config_slave_ip = self.configuration.safe_get("san_secondary_ip")
         self.storage_username = self.configuration.san_login
         self.storage_password = self.configuration.san_password
         #self.max_over_subscription_ratio = (
@@ -606,17 +650,26 @@ class CCFS3000Helper(object):
                 import FCSanLookupService
             self.lookup_service_instance = \
                 FCSanLookupService(configuration=self.configuration)
-        self.client = CCFS3000RESTClient(self.active_storage_ip, 443,
-                                        self.storage_username,
-                                        self.storage_password,
-                                        debug=CONF.debug)
+        self.client = CCFS3000RESTClient(self.config_master_ip,
+                                         self.config_slave_ip,
+                                         443,
+                                         self.storage_username,
+                                         self.storage_password,
+                                         debug=CONF.debug)
         system_info = self.client.get_system_info()
-
         if not system_info:
             msg = _('Basic system information is unavailable.')
             LOG.error(msg)
             raise exception.VolumeBackendAPIException(data=msg)
         self.storage_serial_number = system_info['serialNumber']
+
+        if self.config_slave_ip:
+            self.is_update_slave_ip = False
+        else:
+            self.is_update_slave_ip = True
+            if system_info['controllerHAMode'] == 'DUAL':
+                self.client.set_slave_storage_ip(system_info['slaveIp'])
+
         conf_pools = self.configuration.safe_get("storage_pool_names")
         # When managed_all_pools is True, the storage_pools_map will be
         # updated in update_volume_stats.
@@ -627,7 +680,6 @@ class CCFS3000Helper(object):
         #self.storage_targets = self._get_storage_targets()
 
     def _get_managed_storage_pools_map(self, pools):
-
         managed_pools = self.client.get_pools()
         if pools:
             storage_pool_names = set([po.strip() for po in pools.split(",")])
@@ -662,6 +714,22 @@ class CCFS3000Helper(object):
 
     def _build_storage_pool_id_map(self, pools):
         return {po['Name']: po['Id'] for po in pools}
+
+    def update_slave_storage_ip(self):
+        if not self.is_update_slave_ip:
+            return
+
+        sys_info = self.client.get_system_info()
+        if not sys_info:
+            LOG.warning(_LW('update secondary storage ip: can not get sysinfo'))
+            return
+
+        slave_ip = None
+        if sys_info['controllerHAMode'] == 'DUAL':
+            slave_ip = sys_info['slaveIp']
+        self.client.set_slave_storage_ip(slave_ip)
+        LOG.debug("Updated slave storage ip %s" % slave_ip)
+        return
 
     def _get_iscsi_targets(self):
         res = {'a': [], 'b': []}
@@ -1127,7 +1195,7 @@ class CCFS3000Helper(object):
         data['target_lun'] = host_lun
         if self.storage_protocol == 'iSCSI':
             err, target_iqns, target_portals =\
-                self._do_iscsi_discovery(self.active_storage_ip)
+                self._do_iscsi_discovery(self.client.get_active_storage_ip())
             data['target_iqn'] = target_iqns[0]
             data['target_portal'] = target_portals[0]
             # TODO kevin, for iSCSI multipath
@@ -1300,6 +1368,8 @@ class CCFS3000Helper(object):
         return self.stats
 
     def update_volume_stats(self):
+        self.update_slave_storage_ip()
+
         LOG.debug("Updating volume stats")
         data = {}
         backend_name = self.configuration.safe_get('volume_backend_name')

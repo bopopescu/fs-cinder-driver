@@ -22,9 +22,11 @@ import random
 import re
 import types
 import urllib2
+import time
 
 #from oslo_concurrency import lockutils
 from oslo.config import cfg
+from cinder.openstack.common import loopingcall
 from cinder.openstack.common import log as logging
 #from oslo_utils import timeutils
 import six
@@ -63,7 +65,12 @@ loc_opts = [
                     'allocated from this Cinder backend'),
     cfg.StrOpt('san_secondary_ip',
                default=None,
-               help='Storage slave ip.')]
+               help='Storage slave ip.'),
+    cfg.IntOpt('fs3000_cli_timeout',
+               default=525600,
+               help='Default timeout for CLI copy operations in minutes. '
+               'Support: flatten volume, rollback to snapshot.'
+               'By Default, it is 365 days long.')]
 
 CONF.register_opts(loc_opts)
 
@@ -669,6 +676,7 @@ class CCFS3000Helper(object):
             raise exception.VolumeBackendAPIException(data=msg)
         self.config_master_ip = self.configuration.san_ip
         self.config_slave_ip = self.configuration.safe_get("san_secondary_ip")
+        self.cli_timeout = self.configuration.fs3000_cli_timeout
         self.storage_username = self.configuration.san_login
         self.storage_password = self.configuration.san_password
         #self.max_over_subscription_ratio = (
@@ -846,6 +854,38 @@ class CCFS3000Helper(object):
     def _api_exec_success (self, resp):
         return True if resp['code'] == 0 else False
 
+    def _wait_replica_complete(self, lun_id):
+        start_time = int(time.time())
+        timeout = self.cli_timeout
+
+        def _inner():
+            check_done = False
+            try:
+                err, lun = self.client.get_lun_by_id(lun_id)
+                if err:
+                    LOG.exception('Cannot detect replica status with err=%s' % err)
+                elif not lun:
+                    LOG.exception('Cannot detect replica status.(lun id %s not exist)' % lun_id)
+                LOG.debug('Check lv %s replica status.' % lun_id)
+                LOG.debug(lun)
+                if not lun['cpProgress']: #copy finish
+                    check_done = True
+            except Exception as ex:
+                check_done = False
+                LOG.exception('Cannot detect replica status. ex=%s' % ex)
+
+            if check_done:
+                LOG.debug('Lv %s replica Finish.' % lun_id)
+                raise loopingcall.LoopingCallDone()
+
+            if int(time.time()) - start_time > timeout:
+                msg = _('Wait replica complete timeout.')
+                LOG.error(msg)
+                raise exception.VolumeDriverException(message=msg)
+
+        timer = loopingcall.FixedIntervalLoopingCall(_inner)
+        timer.start(interval=10).wait()
+
     def create_volume(self, volume):
         name = str(volume['display_name'])+'-'+str(volume['name'])
         size = volume['size']
@@ -919,6 +959,7 @@ class CCFS3000Helper(object):
         elif not self._api_exec_success(resp):
             err_msg = 'flatten volume %s/%s failed with err %s.' % (volume['name'], lun_id, resp['code'])
             raise exception.VolumeBackendAPIException(data=err_msg)
+	self._wait_replica_complete(lun_id)
 
     def get_volume_or_snapshot_size(self, volume):
         lun_or_snap_id = self._extra_lun_or_snap_id(volume)
@@ -940,6 +981,8 @@ class CCFS3000Helper(object):
         elif not self._api_exec_success(resp):
             err_msg = 'rollback to snapshot %s/%s failed with err %s.' % (snapshot['name'], snap_id, resp['code'])
             raise exception.VolumeBackendAPIException(data=err_msg)
+        lun_id = self._extra_lun_or_snap_id(snapshot['volume'])
+        self._wait_replica_complete(lun_id)
 
     def _extra_lun_or_snap_id(self, volume):
         if volume.get('provider_location') is None:

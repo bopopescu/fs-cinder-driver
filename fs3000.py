@@ -70,7 +70,11 @@ loc_opts = [
                default=525600,
                help='Default timeout for CLI copy operations in minutes. '
                'Support: flatten volume, rollback to snapshot.'
-               'By Default, it is 365 days long.')]
+               'By Default, it is 365 days long.'),
+    cfg.BoolOpt('flatten_volume_from_snapshot',
+	    default=False,
+	    help='Flatten volumes created from snapshots to remove '
+		 'dependency from volume to snapshot')]
 
 CONF.register_opts(loc_opts)
 
@@ -1526,7 +1530,10 @@ class CCFS3000Driver(san.SanDriver):
         return self.helper.create_volume(volume)
 
     def create_volume_from_snapshot(self, volume, snapshot):
-        return self.helper.create_volume_from_snapshot(volume, snapshot)
+        ret = self.helper.create_volume_from_snapshot(volume, snapshot)
+        if self.configuration.flatten_volume_from_snapshot:
+            self.helper.flatten_volume(volume)
+	return ret
 
     def is_flatten_volume (self, volume):
         return self.helper.is_flatten_volume(volume)

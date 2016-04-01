@@ -501,6 +501,13 @@ class CCFS3000RESTClient(object):
                     'snapshotId' : snap_id}
         return self.request(url_para)
 
+    def create_lun_from_lun (self, name, src_lun_id):
+        url_para = {'service' : 'LvService',
+	            'action' : 'createLvFromLv',
+		    'name' : name,
+		    'srclvId' : src_lun_id}
+	return self.request(url_para)
+
     def create_lun_from_snap (self, name, snap_id):
         url_para = {'service' : 'LvService',
                     'action' : 'createLvFromSnapshot',
@@ -885,11 +892,40 @@ class CCFS3000Helper(object):
         volume['provider_location'] = model_update['provider_location']
         return model_update
 
+    def create_cloned_volume(self, volume, src_vref):
+        name = volume['display_name']+'-'+volume['name']
+        src_lun_id = self._extra_lun_or_snap_id(src_vref)
+        if not src_lun_id:
+	    err_msg = 'Can not get source volume id when create volume %s from volume %s' % (volume['name'], src_vref['name'])
+            raise exception.VolumeBackendAPIException(data=err_msg)
+        err, resp = self.client.create_lun_from_lun(name, src_lun_id)
+        if err:
+            raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not self._api_exec_success(resp):
+            err_msg = 'create volume %s from volume %s/%s failed with err %s.' % (volume['name'], src_vref['name'], src_lun_id, resp['code'])
+            raise exception.VolumeBackendAPIException(data=err_msg)
+
+        err, lun = self.client.get_lun_by_name(name)
+        if err:
+            raise exception.VolumeBackendAPIException(data=err['messages'])
+        elif not lun:
+            err_msg = 'can not get created LV by name %s' % name
+            raise exception.VolumeBackendAPIException(data=err_msg)
+
+        pl_dict = {'system': self.storage_serial_number,
+                   'type': 'lun',
+                   'id': lun['Id']}
+        model_update = {'provider_location':
+                        self._dumps_provider_location(pl_dict)}
+        volume['provider_location'] = model_update['provider_location']
+        return model_update
+
     def create_volume_from_snapshot(self, volume, snapshot):
         name = volume['display_name']+'-'+volume['name']
         snap_id = self._extra_lun_or_snap_id(snapshot)
-        if not snap_id: #TODO: add log message
-            return
+        if not snap_id:
+	    err_msg = 'Can not get snapshot id when create volume %s from snapshot %s' % (volume['name'], snapshot['name'])
+            raise exception.VolumeBackendAPIException(data=err_msg)
         err, resp = self.client.create_lun_from_snap(name, snap_id)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
@@ -1556,7 +1592,12 @@ class CCFS3000Driver(san.SanDriver):
         return self.helper.get_volume_or_snapshot_size(snapshot)
 
     def create_cloned_volume(self, volume, src_vref):
-        pass
+        return self.helper.create_cloned_volume(volume, src_vref)
+
+    def create_full_cloned_volume(self, volume, src_vref):
+	ret = self.helper.create_cloned_volume(volume, src_vref)
+	self.helper.flatten_volume(volume)
+	return ret
 
     def delete_volume(self, volume):
         return self.helper.delete_volume(volume)

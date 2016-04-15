@@ -308,7 +308,7 @@ class CCFS3000RESTClient(object):
                         rel_url = self._getRelURL(url_para)
                         err, resp = self._request(rel_url)
                     elif 'code' in try_login_resp:
-                        LOG.warning('request ha: login with err %s' % try_loginresp['code'])
+                        LOG.warning('request ha: login with err %s' % try_login_resp['code'])
             return err, resp
         return ha_inner
 

@@ -456,13 +456,13 @@ class CCFS3000RESTClient(object):
         err, resp = self.request(url_para)
         return err, resp
 
-    def expose_lun(self, lun_id, host_lun, initiators, protocol):
+    def expose_lun(self, lun_id, host_lun, initiator, protocol):
         if protocol == 'FC':
             url_para = {'service' : 'FCLunMappingService',
                         'action' : 'createFCLunMapping',
                         'lvId' : lun_id,
                         'lunNumber' : host_lun,
-                        'wwn' : initiator}
+                        'wwn' : str(initiator).upper()}
         elif protocol == 'iSCSI':
             url_para = {'service' : 'LunMappingService',
                         'action' : 'createLunMappingWithChapUser',
@@ -472,7 +472,7 @@ class CCFS3000RESTClient(object):
         err, resp = self.request(url_para)
         return err, resp
 
-    def hide_lun(self, lun_id, host_id, protocol):
+    def hide_lun(self, host_lun, host_id, protocol):
         if protocol == 'FC':
             url_para = {'service' : 'FCLunMappingService',
                         'action' : 'deleteFCLunMapping',
@@ -1199,23 +1199,18 @@ class CCFS3000Helper(object):
 
     def expose_lun(self, volume, lun_data, initiators):
         for initiator in initiators:
-            err, resp = self.client.get_used_luns(self.protocol, initiator)
+            err, resp = self.client.get_used_luns(self.storage_protocol, initiator)
             if err:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
-            elif not self._api_exec_success(resp):
-                err_msg = _('get_used_luns (%s %s) failed with err %s.' %
-                            (self.protocol, initiator, resp['code']))
-                raise exception.VolumeBackendAPIException(data=err_msg)
 
             host_lun = 0
             resp.sort()
             for used_lun in resp:
                 if (host_lun == int(used_lun)):
                     host_lun += 1
-            LOG.debug("expose_lun lun_id %s init %s host_lun %s",
-                lun_id, initiator, host_lun)
+
             lun_id = lun_data['Id']
-            err, resp = self.client.expose_lun(lun_id, host_id, host_lun,
+            err, resp = self.client.expose_lun(lun_id, host_lun, initiator,
                             self.storage_protocol)
             if err:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
@@ -1251,10 +1246,6 @@ class CCFS3000Helper(object):
         err, resp = self.client.get_all_lun_map(initiator, lun_id, protocol)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
-        elif not self._api_exec_success(resp):
-            err_msg = _('get_all_lun_map (%s %s %s) failed with err %s' % 
-                (initiator, lun_id, protocol, resp['code']))
-            raise exception.VolumeBackendAPIException(data=err_msg)
 
         LOG.debug("all lun map %s", resp)
         host_lun = -1
@@ -1387,14 +1378,13 @@ class CCFS3000Helper(object):
         flow_engine.run()
         return json.loads(flow_engine.storage.fetch('connection_info'))
 
-    def hide_lun(self, volume, lun_data, host_id):
+    def hide_lun(self, volume, lun_data, initiators):
 
-        for initiator in host_id:
+        for initiator in initiators:
             lun_id = lun_data['Id']
-            host_lun = self.get_host_lun(initiator, lun_id, protocol)
+            host_lun = self.get_host_lun(initiator, lun_id, self.storage_protocol)
 
-            err, resp = self.client.hide_lun(lun_id, initiator, host_lun,
-                            self.storage_protocol)
+            err, resp = self.client.hide_lun(host_lun, initiator, self.storage_protocol)
             if err:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
             elif not self._api_exec_success(resp):

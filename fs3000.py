@@ -1220,7 +1220,7 @@ class CCFS3000Helper(object):
                 raise exception.VolumeBackendAPIException(data=err['messages'])
             elif not self._api_exec_success(resp):
                 err_msg = _('%s createLunMapping(%s %s %s) failed with err %s.' %
-                        (protocol, lun_id, host_lun, initiator, resp['code']))
+                        (self.storage_protocol, lun_id, host_lun, initiator, resp['code']))
                 raise exception.VolumeBackendAPIException(data=err_msg)
 
             LOG.debug("exposed_lun lun_id %s init %s host_lun %s",
@@ -1385,6 +1385,10 @@ class CCFS3000Helper(object):
     def hide_lun(self, volume, lun_data, initiators):
 
         for initiator in initiators:
+            active_wwns = self.client.get_active_fc_wwns(str(initiator).upper())
+            if not active_wwns:
+                LOG.debug("don't hide_lun init %s", initiator)
+                continue
             lun_id = lun_data['Id']
             host_lun = self.get_host_lun(initiator, lun_id, self.storage_protocol)
 

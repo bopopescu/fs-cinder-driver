@@ -1199,6 +1199,10 @@ class CCFS3000Helper(object):
 
     def expose_lun(self, volume, lun_data, initiators):
         for initiator in initiators:
+            active_wwns = self.client.get_active_fc_wwns(str(initiator).upper())
+            if not active_wwns:
+                LOG.debug("don't expose init %s", initiator)
+                continue
             err, resp = self.client.get_used_luns(self.storage_protocol, initiator)
             if err:
                 raise exception.VolumeBackendAPIException(data=err['messages'])

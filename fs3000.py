@@ -866,7 +866,7 @@ class CCFS3000Helper(object):
         timer.start(interval=10).wait()
 
     def create_volume(self, volume):
-        name = str(volume['display_name'])+'-'+str(volume['name'])
+        name = str(volume['name'])
         size = volume['size']
         err, resp = self.client.create_lun(
             self._get_target_storage_pool_id(volume), name, size,
@@ -893,7 +893,7 @@ class CCFS3000Helper(object):
         return model_update
 
     def create_cloned_volume(self, volume, src_vref):
-        name = volume['display_name']+'-'+volume['name']
+        name = volume['name']
         src_lun_id = self._extra_lun_or_snap_id(src_vref)
         if not src_lun_id:
 	    err_msg = 'Can not get source volume id when create volume %s from volume %s' % (volume['name'], src_vref['name'])
@@ -921,7 +921,7 @@ class CCFS3000Helper(object):
         return model_update
 
     def create_volume_from_snapshot(self, volume, snapshot):
-        name = volume['display_name']+'-'+volume['name']
+        name = volume['name']
         snap_id = self._extra_lun_or_snap_id(snapshot)
         if not snap_id:
 	    err_msg = 'Can not get snapshot id when create volume %s from snapshot %s' % (volume['name'], snapshot['name'])
@@ -1603,7 +1603,7 @@ class CCFS3000Driver(san.SanDriver):
     def create_snapshot(self, snapshot):
         """Creates a snapshot."""
         LOG.debug('Entering create_snapshot.')
-        snapshotname = snapshot['display_name']+'-'+snapshot['name']
+        snapshotname = snapshot['name']
         volumename = snapshot['volume_name']
         snap_desc = snapshot['display_description']
         LOG.info(_LI('Create snapshot: %(snapshot)s: volume: %(volume)s'),

@@ -978,8 +978,8 @@ class CCFS3000Helper(object):
             err_msg = 'can not get volume/snapshot size by id %s err %s' % (lun_or_snap_id, resp)
             raise exception.VolumeBackendAPIException(data=err_msg)
 
-        size_gb = float(resp)/1024/1024/1024
-        return size_gb
+        size_kb = int(resp)/1024
+        return size_kb
 
     def rollback_to_snapshot(self, snapshot):
         snap_id = self._extra_lun_or_snap_id(snapshot)

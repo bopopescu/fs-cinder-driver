@@ -24,11 +24,9 @@ import types
 import urllib2
 import time
 
-#from oslo_concurrency import lockutils
 from oslo.config import cfg
 from cinder.openstack.common import loopingcall
 from cinder.openstack.common import log as logging
-#from oslo_utils import timeutils
 import six
 import taskflow.engines
 from taskflow.patterns import linear_flow
@@ -44,7 +42,6 @@ from cinder.volume import utils as vol_utils
 from cinder.volume import volume_types
 from cinder.zonemanager import utils as zm_utils
 from cinder import utils
-#from cinder.volume.drivers.infortrend.eonstor_ds_cli import cli_factory as cli
 
 LOG = logging.getLogger(__name__)
 
@@ -61,20 +58,20 @@ loc_opts = [
                help='Comma-separated list of storage pool names to be used.'),
     cfg.StrOpt('storage_protocol',
                default='iSCSI',
-               help='Protocol to access the storage '
-                    'allocated from this Cinder backend'),
+               help=('Protocol to access the storage '
+                     'allocated from this Cinder backend')),
     cfg.StrOpt('san_secondary_ip',
                default=None,
                help='Storage slave ip.'),
     cfg.IntOpt('fs3000_cli_timeout',
                default=525600,
-               help='Default timeout for CLI copy operations in minutes. '
-               'Support: flatten volume, rollback to snapshot.'
-               'By Default, it is 365 days long.'),
+               help=('Default timeout for CLI copy operations in minutes. '
+                     'Support: flatten volume, rollback to snapshot.'
+                     'By Default, it is 365 days long.')),
     cfg.BoolOpt('flatten_volume_from_snapshot',
-	    default=False,
-	    help='Flatten volumes created from snapshots to remove '
-		 'dependency from volume to snapshot')]
+                default=False,
+                help=('Flatten volumes created from snapshots to remove '
+                      'dependency from volume to snapshot'))]
 
 CONF.register_opts(loc_opts)
 
@@ -104,17 +101,17 @@ def log_enter_exit(func):
         return func
 
     def inner(self, *args, **kwargs):
-        LOG.debug("Entering %(cls)s.%(method)s",
+        LOG.debug('Entering %(cls)s.%(method)s',
                   {'cls': self.__class__.__name__,
                    'method': func.__name__})
-        #start = timeutils.utcnow()
+        # start = timeutils.utcnow()
         ret = func(self, *args, **kwargs)
-        #end = timeutils.utcnow()
-        LOG.debug("Exiting %(cls)s.%(method)s. "
-                  "Spent %(duration)s sec. "
-                  "Return %(return)s",
+        # end = timeutils.utcnow()
+        LOG.debug('Exiting %(cls)s.%(method)s. '
+                  'Spent %(duration)s sec. '
+                  'Return %(return)s',
                   {'cls': self.__class__.__name__,
-                   #'duration': timeutils.delta_seconds(start, end),
+                   # 'duration': timeutils.delta_seconds(start, end),
                    'method': func.__name__,
                    'return': ret})
         return ret
@@ -132,13 +129,15 @@ class CCFS3000RESTClient(object):
     HostLUNAccessEnum_NoAccess = 0
     HostLUNAccessEnum_Production = 1
 
-    def __init__(self, master_ip, slave_ip, port=443, user='', password='', debug=False):
+    def __init__(self, master_ip, slave_ip, port=443, user='', password='',
+                 debug=False):
         self.username = user
         self.password = password
         self.active_storage_ip = master_ip
         self.slave_storage_ip = slave_ip
         self.port = port
-        LOG.info('init active storate ip %s, slave storage ip %s' % (master_ip, slave_ip))
+        LOG.info('init active storate ip %s, slave storage ip %s' %
+                 (master_ip, slave_ip))
         self.mgmt_url = 'https://%(host)s:%(port)s' % {'host': master_ip,
                                                        'port': port}
         self.debug = debug
@@ -146,13 +145,13 @@ class CCFS3000RESTClient(object):
         self.cookie_handler = urllib2.HTTPCookieProcessor(self.cookie_jar)
         self.url_opener = urllib2.build_opener(self.cookie_handler)
 
-    def get_active_storage_ip (self):
+    def get_active_storage_ip(self):
         return self.active_storage_ip
 
-    def get_slave_storage_ip (self):
+    def get_slave_storage_ip(self):
         return self.slave_storage_ip
 
-    def set_slave_storage_ip (self, slave_ip):
+    def set_slave_storage_ip(self, slave_ip):
         if self.slave_storage_ip != slave_ip:
             LOG.info('set slave storage ip %s' % slave_ip)
         self.slave_storage_ip = slave_ip
@@ -191,7 +190,7 @@ class CCFS3000RESTClient(object):
                  'resp_b': body})
         else:
             LOG.debug(
-                "RESP: [%s] %s\nRESP BODY: %s\n",
+                'RESP: [%s] %s\nRESP BODY: %s\n',
                 resp.getcode(),
                 str(resp.headers).replace('\n', '\\n'),
                 body)
@@ -211,8 +210,8 @@ class CCFS3000RESTClient(object):
 
     def _getRelURL(self, parameter):
         strPara = ""
-        for key, value in parameter.items() :
-            strPara += "&%(key)s=%(value)s" % {'key' : key, 'value' : value}
+        for key, value in parameter.items():
+            strPara += "&%(key)s=%(value)s" % {'key': key, 'value': value}
         strURL = "/serviceHandler.php?" + strPara
         if self.debug:
             LOG.debug("_getRelURL = %s" % strURL)
@@ -223,7 +222,8 @@ class CCFS3000RESTClient(object):
         req_body = None if req_data is None else json.dumps(req_data)
         err = None
         resp_data = None
-        url = self.mgmt_url + rel_url if not assign_url else assign_url + rel_url
+        url = (self.mgmt_url +
+               rel_url if not assign_url else assign_url + rel_url)
         req = urllib2.Request(url, req_body, CCFS3000RESTClient.HEADERS)
         if method not in (None, 'GET', 'POST'):
             req.get_method = lambda: method
@@ -264,10 +264,10 @@ class CCFS3000RESTClient(object):
             return (err, resp_data) if return_rest_err else resp_data
 
     def _login(self, assign_url=None):
-        url_parameter = {'service' : 'LoginService',
-                         'action' : 'login',
-                         'account' : self.username,
-                         'password' : self.password}
+        url_parameter = {'service': 'LoginService',
+                         'action': 'login',
+                         'account': self.username,
+                         'password': self.password}
         login_rel = self._getRelURL(url_parameter)
         err, resp = self._request(login_rel, assign_url=assign_url)
 
@@ -277,51 +277,56 @@ class CCFS3000RESTClient(object):
                 if cookie.name == "PHPSESSID":
                     php_session_id = cookie.value
                     break
-            cookie_content = 'PHPSESSID=%s'%php_session_id
+            cookie_content = 'PHPSESSID=%s' % php_session_id
             self.url_opener.addheaders.append(('Cookie', cookie_content))
         return err, resp
 
     def _is_login(self):
-        url_parameter = {'service' : 'LoginService',
-                         'action' : 'echoIsLogin'}
+        url_parameter = {'service': 'LoginService',
+                         'action': 'echoIsLogin'}
         return self._request(self._getRelURL(url_parameter))
 
     def _logout(self):
-        url_parameter = {'service' : 'LoginService',
-                         'action' : 'logout'}
+        url_parameter = {'service': 'LoginService',
+                         'action': 'logout'}
         self._request(self._getRelURL(url_parameter))
 
-    def request_ha (req):
+    def request_ha(req):
         def ha_inner(self, *args, **kwargs):
             err, resp = req(self, *args, **kwargs)
             if err and self.slave_storage_ip:
                 LOG.debug('request ha: try slave storage')
-                try_ha_url = 'https://%(host)s:%(port)s' % {'host': self.slave_storage_ip,
-                                                            'port': self.port}
-                try_login_err, try_login_resp = self._login(assign_url=try_ha_url)
+                try_ha_url = ('https://%(host)s:%(port)s' %
+                              {'host': self.slave_storage_ip,
+                               'port': self.port})
+                try_login_err, try_login_resp =\
+                    self._login(assign_url=try_ha_url)
                 if not try_login_err:
                     if 'permission' in try_login_resp:
-                        LOG.info('request ha: active storage ip change to %s' % self.slave_storage_ip)
-                        self.active_storage_ip, self.slave_storage_ip = self.slave_storage_ip, self.active_storage_ip
+                        LOG.info('request ha: active storage ip change to %s' %
+                                 self.slave_storage_ip)
+                        self.active_storage_ip, self.slave_storage_ip =\
+                            self.slave_storage_ip, self.active_storage_ip
                         self.mgmt_url = try_ha_url
                         url_para = args[0]
                         rel_url = self._getRelURL(url_para)
                         err, resp = self._request(rel_url)
                     elif 'code' in try_login_resp:
-                        LOG.warning('request ha: login with err %s' % try_login_resp['code'])
+                        LOG.warning('request ha: login with err %s' %
+                                    try_login_resp['code'])
             return err, resp
         return ha_inner
 
     @request_ha
-    def request (self, url_para):
+    def request(self, url_para):
         err, resp = self._is_login()
-        if err: 
+        if err:
             LOG.warning('request: check is login failed.')
             return err, resp
         elif 'login' in resp:
-            if resp['login']=='false':
+            if resp['login'] == 'false':
                 err, resp = self._login()
-                if err: 
+                if err:
                     LOG.warning('request: login failed.')
                     return err, resp
                 elif 'code' in resp:
@@ -333,24 +338,23 @@ class CCFS3000RESTClient(object):
 
         rel_url = self._getRelURL(url_para)
         err, resp = self._request(rel_url)
-        #self._logout()
         return err, resp
 
     def get_pools(self, fields=None):
-        url_parameter = {'service' : 'VgService',
-                         'action' : 'getAllVGs'}
+        url_parameter = {'service': 'VgService',
+                         'action': 'getAllVGs'}
         err, pools = self.request(url_parameter)
         return pools if not err else None
 
     def get_luns(self):
-        url_parameter = {'service' : 'LvService',
-                         'action' : 'getAllLVs'}
+        url_parameter = {'service': 'LvService',
+                         'action': 'getAllLVs'}
         return self.request(url_parameter)
 
     def get_lun_by_name(self, name):
         err, luns = self.get_luns()
         if not err:
-            for lun in luns :
+            for lun in luns:
                 if lun['Name'] == name:
                     return err, lun
         return err, None
@@ -358,52 +362,54 @@ class CCFS3000RESTClient(object):
     def get_lun_by_id(self, lun_id):
         err, luns = self.get_luns()
         if not err:
-            for lun in luns :
+            for lun in luns:
                 if lun['Id'] == lun_id:
                     return err, lun
         return err, None
-                
+
     def get_snaps_by_lunid(self, lun_id):
-        url_parameter = {'service' : 'LvService',
-                         'action' : 'getSnapshotsByLv',
-                         'lvId' : lun_id}
+        url_parameter = {'service': 'LvService',
+                         'action': 'getSnapshotsByLv',
+                         'lvId': lun_id}
         return self.request(url_parameter)
 
-    def get_snap_by_name (self, lun_id, snapname):
+    def get_snap_by_name(self, lun_id, snapname):
         err, snaps = self.get_snaps_by_lunid(lun_id)
         if not err:
-            for snap in snaps :
+            for snap in snaps:
                 if snap['Name'] == snapname:
                     return err, snap
         return err, None
 
     def get_system_info(self):
-        url_parameter = {'service' : 'SysinfoService',
-                         'action' : 'getDetail'}
+        url_parameter = {'service': 'SysinfoService',
+                         'action': 'getDetail'}
         err, resp = self.request(url_parameter)
         return None if err else resp
+
     def get_active_fc_wwns(self, initiator):
-        url_parameter = {'service' : 'FCLunMappingService',
-                         'action' : 'getTargetPortNumberByInitator',
-                         'wwn' : initiator}
+        initiator = str(initiator).upper()
+        url_parameter = {'service': 'FCLunMappingService',
+                         'action': 'getTargetPortNumberByInitator',
+                         'wwn': initiator}
         err, resp = self.request(url_parameter)
         return resp
 
     def create_lun(self, pool_id, name, size, lvtype):
-        url_para = {'service' : 'LvService',
-                    'action' : 'createLv',
-                    'name' : name,
-                    'vgId' : pool_id,
-                    'sizeGB' : size,
-                    'lvType' : lvtype}
+        url_para = {'service': 'LvService',
+                    'action': 'createLv',
+                    'name': name,
+                    'vgId': pool_id,
+                    'sizeGB': size,
+                    'lvType': lvtype}
         err, resp = self.request(url_para)
         return (err, None) if err else \
             (err, resp)
 
     def delete_lun(self, lun_id, force_snap_deletion=False):
-        url_para = {'service' : 'LvService',
-                    'action' : 'deleteLv',
-                    'id' : lun_id}
+        url_para = {'service': 'LvService',
+                    'action': 'deleteLv',
+                    'id': lun_id}
         return self.request(url_para)
 
     def create_host(self, hostname):
@@ -428,7 +434,7 @@ class CCFS3000RESTClient(object):
         return (err, None) if err else (err, resp['content'])
 
     def register_initiator(self, initiator_id, host_id):
-        initiator_register_url = \
+        initiator_register_url =\
             '/api/instances/hostInitiator/%s/action/register' % initiator_id
         data = {'host': {'id': host_id}}
         err, resp = self._request(initiator_register_url, data)
@@ -436,121 +442,121 @@ class CCFS3000RESTClient(object):
 
     def get_all_lun_map(self, host_id, lun_id, protocol):
         if protocol == 'FC':
-            url_para = {'service' : 'FCLunMappingService',
-                        'action' : 'getAllFCLunMappings'}
+            url_para = {'service': 'FCLunMappingService',
+                        'action': 'getAllFCLunMappings'}
         elif protocol == 'iSCSI':
-            url_para = {'service' : 'LunMappingService',
-                        'action' : 'getAllFS3000LunMappings'}
+            url_para = {'service': 'LunMappingService',
+                        'action': 'getAllFS3000LunMappings'}
         err, resp = self.request(url_para)
         return err, resp
 
     def get_used_luns(self, protocol, initiator):
         if protocol == 'FC':
-            url_para = {'service' : 'FCLunMappingService',
-                        'action' : 'echoUsedLunsByWWN',
-                        'wwn' : initiator.upper()}
+            url_para = {'service': 'FCLunMappingService',
+                        'action': 'echoUsedLunsByWWN',
+                        'wwn': initiator.upper()}
         elif protocol == 'iSCSI':
-            url_para = {'service' : 'LunMappingService',
-                        'action' : 'echoUsedLunsByInitiator',
-                        'initiator' : initiator}
+            url_para = {'service': 'LunMappingService',
+                        'action': 'echoUsedLunsByInitiator',
+                        'initiator': initiator}
         err, resp = self.request(url_para)
         return err, resp
 
     def expose_lun(self, lun_id, host_lun, initiator, protocol):
         if protocol == 'FC':
-            url_para = {'service' : 'FCLunMappingService',
-                        'action' : 'createFCLunMapping',
-                        'lvId' : lun_id,
-                        'lunNumber' : host_lun,
-                        'wwn' : str(initiator).upper()}
+            url_para = {'service': 'FCLunMappingService',
+                        'action': 'createFCLunMapping',
+                        'lvId': lun_id,
+                        'lunNumber': host_lun,
+                        'wwn': str(initiator).upper()}
         elif protocol == 'iSCSI':
-            url_para = {'service' : 'LunMappingService',
-                        'action' : 'createLunMappingWithChapUser',
-                        'lvId' : lun_id,
-                        'lunNumber' : host_lun,
-                        'initiator' : initiator}
+            url_para = {'service': 'LunMappingService',
+                        'action': 'createLunMappingWithChapUser',
+                        'lvId': lun_id,
+                        'lunNumber': host_lun,
+                        'initiator': initiator}
         err, resp = self.request(url_para)
         return err, resp
 
     def hide_lun(self, host_lun, host_id, protocol):
         if protocol == 'FC':
-            url_para = {'service' : 'FCLunMappingService',
-                        'action' : 'deleteFCLunMapping',
-                        'lunNumber' : host_lun,
-                        'wwn' : host_id}
+            url_para = {'service': 'FCLunMappingService',
+                        'action': 'deleteFCLunMapping',
+                        'lunNumber': host_lun,
+                        'wwn': host_id}
         elif protocol == 'iSCSI':
-            url_para = {'service' : 'LunMappingService',
-                        'action' : 'deleteLunMappingWithChapUser',
-                        'lunNumber' : host_lun,
-                        'initiator' : host_id}
+            url_para = {'service': 'LunMappingService',
+                        'action': 'deleteLunMappingWithChapUser',
+                        'lunNumber': host_lun,
+                        'initiator': host_id}
         err, resp = self.request(url_para)
         return err, resp
 
     def create_snap(self, lun_id, snap_name, lun_size, snap_description=None):
-        url_para = {'service' : 'LvService',
-                    'action' : 'createSnapshot',
-                    'lvId' : lun_id,
-                    'name' : snap_name,
-                    'spaceGB' : lun_size}
+        url_para = {'service': 'LvService',
+                    'action': 'createSnapshot',
+                    'lvId': lun_id,
+                    'name': snap_name,
+                    'spaceGB': lun_size}
         return self.request(url_para)
 
     def delete_snap(self, snap_id):
         """Deletes the snap by the snap_id."""
-        url_para = {'service' : 'LvService',
-                    'action' : 'deleteSnapshot',
-                    'snapshotId' : snap_id}
+        url_para = {'service': 'LvService',
+                    'action': 'deleteSnapshot',
+                    'snapshotId': snap_id}
         return self.request(url_para)
 
-    def create_lun_from_lun (self, name, src_lun_id):
-        url_para = {'service' : 'LvService',
-	            'action' : 'createLvFromLv',
-		    'name' : name,
-		    'srclvId' : src_lun_id}
-	return self.request(url_para)
-
-    def create_lun_from_snap (self, name, snap_id):
-        url_para = {'service' : 'LvService',
-                    'action' : 'createLvFromSnapshot',
-                    'name' : name,
-                    'snapshotId' : snap_id}
+    def create_lun_from_lun(self, name, src_lun_id):
+        url_para = {'service': 'LvService',
+                    'action': 'createLvFromLv',
+                    'name': name,
+                    'srclvId': src_lun_id}
         return self.request(url_para)
 
-    def is_flatten_lun (self, lun_id):
-        url_para = {'service' : 'LvService',
-                    'action' : 'isFlattenLv',
-                    'lvId' : lun_id}
+    def create_lun_from_snap(self, name, snap_id):
+        url_para = {'service': 'LvService',
+                    'action': 'createLvFromSnapshot',
+                    'name': name,
+                    'snapshotId': snap_id}
         return self.request(url_para)
 
-    def flatten_lun (self, lun_id):
-        url_para = {'service' : 'LvService',
-                    'action' : 'flattenLv',
-                    'lvId' : lun_id}
+    def is_flatten_lun(self, lun_id):
+        url_para = {'service': 'LvService',
+                    'action': 'isFlattenLv',
+                    'lvId': lun_id}
         return self.request(url_para)
 
-    def get_lun_or_snap_size (self, lun_or_snap_id):
-        url_para = {'service' : 'LvService',
-                    'action' : 'getLvRSize',
-                    'lvId' : lun_or_snap_id}
+    def flatten_lun(self, lun_id):
+        url_para = {'service': 'LvService',
+                    'action': 'flattenLv',
+                    'lvId': lun_id}
         return self.request(url_para)
 
-    def rollback_to_snap (self, snap_id):
-        url_para = {'service' : 'LvService',
-                    'action' : 'doRollbackToSnapshot',
-                    'SnapId' : snap_id}
+    def get_lun_or_snap_size(self, lun_or_snap_id):
+        url_para = {'service': 'LvService',
+                    'action': 'getLvRSize',
+                    'lvId': lun_or_snap_id}
+        return self.request(url_para)
+
+    def rollback_to_snap(self, snap_id):
+        url_para = {'service': 'LvService',
+                    'action': 'doRollbackToSnapshot',
+                    'SnapId': snap_id}
         return self.request(url_para)
 
     def extend_lun(self, lun_id, size):
-        url_para = {'service' : 'LvService',
-                    'action' : 'doExpandLvSize',
-                    'lvId' : lun_id,
-                    'expandedSizeMB' : size*1024}
+        url_para = {'service': 'LvService',
+                    'action': 'doExpandLvSize',
+                    'lvId': lun_id,
+                    'expandedSizeMB': size*1024}
         err, resp = self.request(url_para)
         return (err, None) if err else \
             (err, resp)
 
     def modify_lun_name(self, lun_id, new_name):
         """Modify the lun name."""
-        lun_modify_url = \
+        lun_modify_url =\
             '/api/instances/storageResource/%s/action/modifyLun' % lun_id
         data = {'name': new_name}
         err, resp = self._request(lun_modify_url, data)
@@ -623,7 +629,7 @@ class GetConnectionInfoTask(task.Task):
                    'host': host_id})
         return self.helper.get_connection_info(self.volume,
                                                self.connector,
-                                               #self.lun_data['currentNode'],
+                                               # self.lun_data['currentNode'],
                                                self.lun_data['Id'],
                                                host_id)
 
@@ -645,7 +651,7 @@ class CCFS3000Helper(object):
         self.configuration.append_config_values(san.san_opts)
         self.storage_protocol = conf.storage_protocol
         self.supported_storage_protocols = ('iSCSI', 'FC')
-        self.lvtype = 4 #thin lv
+        self.lvtype = 4  # thin lv
         if self.storage_protocol not in self.supported_storage_protocols:
             msg = _('storage_protocol %(invalid)s is not supported. '
                     'The valid one should be among %(valid)s.') % {
@@ -658,7 +664,7 @@ class CCFS3000Helper(object):
         self.cli_timeout = self.configuration.fs3000_cli_timeout
         self.storage_username = self.configuration.san_login
         self.storage_password = self.configuration.san_password
-        #self.max_over_subscription_ratio = (
+        # self.max_over_subscription_ratio = (
         #    self.configuration.max_over_subscription_ratio)
         self.lookup_service_instance = None
         # Here we use group config to keep same as cinder manager
@@ -667,7 +673,7 @@ class CCFS3000Helper(object):
                 self.configuration.safe_get('zoning_mode') == 'fabric'):
             from cinder.zonemanager.fc_san_lookup_service \
                 import FCSanLookupService
-            self.lookup_service_instance = \
+            self.lookup_service_instance =\
                 FCSanLookupService(configuration=self.configuration)
         self.client = CCFS3000RESTClient(self.config_master_ip,
                                          self.config_slave_ip,
@@ -695,8 +701,8 @@ class CCFS3000Helper(object):
         self.is_managing_all_pools = False if conf_pools else True
         self.storage_pools_map = self._get_managed_storage_pools_map(
             conf_pools)
-        #self.thin_enabled = False
-        #self.storage_targets = self._get_storage_targets()
+        # self.thin_enabled = False
+        # self.storage_targets = self._get_storage_targets()
 
     def _get_managed_storage_pools_map(self, pools):
         managed_pools = self.client.get_pools()
@@ -740,7 +746,7 @@ class CCFS3000Helper(object):
 
         sys_info = self.client.get_system_info()
         if not sys_info:
-            LOG.warning(_LW('update secondary storage ip: can not get sysinfo'))
+            LOG.warning(_LW('update secondary storage ip: cannot get sysinfo'))
             return
 
         slave_ip = None
@@ -820,7 +826,7 @@ class CCFS3000Helper(object):
         err, lun = self.client.get_lun_by_id(lun_id)
         if err or not lun:
             raise exception.VolumeBackendAPIException(
-                "Cannot find lun with id : %s" % lun_id)
+                "Cannot find lun with id: %s" % lun_id)
         return lun
 
     def _get_target_storage_pool_name(self, volume):
@@ -830,7 +836,7 @@ class CCFS3000Helper(object):
         name = self._get_target_storage_pool_name(volume)
         return self.storage_pools_map[name]
 
-    def _api_exec_success (self, resp):
+    def _api_exec_success(self, resp):
         return True if resp['code'] == 0 else False
 
     def _wait_replica_complete(self, lun_id):
@@ -842,12 +848,14 @@ class CCFS3000Helper(object):
             try:
                 err, lun = self.client.get_lun_by_id(lun_id)
                 if err:
-                    LOG.exception('Cannot detect replica status with err=%s' % err)
+                    LOG.exception('Cannot detect replica status with err=%s' %
+                                  err)
                 elif not lun:
-                    LOG.exception('Cannot detect replica status.(lun id %s not exist)' % lun_id)
+                    LOG.exception('Cannot detect replica status.(lun id %s not'
+                                  ' exist)' % lun_id)
                 LOG.debug('Check lv %s replica status.' % lun_id)
                 LOG.debug(lun)
-                if not lun['cpProgress']: #copy finish
+                if not lun['cpProgress']:  # copy finish
                     check_done = True
             except Exception as ex:
                 check_done = False
@@ -874,7 +882,8 @@ class CCFS3000Helper(object):
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not self._api_exec_success(resp):
-            err_msg = 'create volume %s failed with err %s.' % (volume['name'], resp['code'])
+            err_msg = ('create volume %s failed with err %s.' %
+                       (volume['name'], resp['code']))
             raise exception.VolumeBackendAPIException(data=err_msg)
 
         err, lun = self.client.get_lun_by_name(name)
@@ -896,13 +905,16 @@ class CCFS3000Helper(object):
         name = volume['name']
         src_lun_id = self._extra_lun_or_snap_id(src_vref)
         if not src_lun_id:
-	    err_msg = 'Can not get source volume id when create volume %s from volume %s' % (volume['name'], src_vref['name'])
+            err_msg = ('Can not get source volume id when create volume %s'
+                       ' from volume %s' % (volume['name'], src_vref['name']))
             raise exception.VolumeBackendAPIException(data=err_msg)
         err, resp = self.client.create_lun_from_lun(name, src_lun_id)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not self._api_exec_success(resp):
-            err_msg = 'create volume %s from volume %s/%s failed with err %s.' % (volume['name'], src_vref['name'], src_lun_id, resp['code'])
+            err_msg = ('create volume %s from volume %s/%s failed, err %s.' %
+                       (volume['name'], src_vref['name'], src_lun_id,
+                        resp['code']))
             raise exception.VolumeBackendAPIException(data=err_msg)
 
         err, lun = self.client.get_lun_by_name(name)
@@ -924,13 +936,16 @@ class CCFS3000Helper(object):
         name = volume['name']
         snap_id = self._extra_lun_or_snap_id(snapshot)
         if not snap_id:
-	    err_msg = 'Can not get snapshot id when create volume %s from snapshot %s' % (volume['name'], snapshot['name'])
+            err_msg = ('Can not get snapshot id when create volume %s from'
+                       ' snapshot %s' % (volume['name'], snapshot['name']))
             raise exception.VolumeBackendAPIException(data=err_msg)
         err, resp = self.client.create_lun_from_snap(name, snap_id)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not self._api_exec_success(resp):
-            err_msg = 'create volume %s from snapshot %s/%s failed with err %s.' % (volume['name'], snapshot['name'], snap_id, resp['code'])
+            err_msg =\
+                ('create volume %s from snapshot %s/%s failed, err %s.' %
+                 (volume['name'], snapshot['name'], snap_id, resp['code']))
             raise exception.VolumeBackendAPIException(data=err_msg)
 
         err, lun = self.client.get_lun_by_name(name)
@@ -954,7 +969,8 @@ class CCFS3000Helper(object):
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif type(resp) is not bool:
-            err_msg = 'is flatten volume api fail. id %s resp %s' % (lun_id, resp)
+            err_msg = ('is flatten volume api fail. id %s resp %s' %
+                       (lun_id, resp))
             raise exception.VolumeBackendAPIException(data=err_msg)
 
         return resp
@@ -965,9 +981,10 @@ class CCFS3000Helper(object):
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not self._api_exec_success(resp):
-            err_msg = 'flatten volume %s/%s failed with err %s.' % (volume['name'], lun_id, resp['code'])
+            err_msg = ('flatten volume %s/%s failed with err %s.' %
+                       (volume['name'], lun_id, resp['code']))
             raise exception.VolumeBackendAPIException(data=err_msg)
-	self._wait_replica_complete(lun_id)
+        self._wait_replica_complete(lun_id)
 
     def get_volume_or_snapshot_size(self, volume):
         lun_or_snap_id = self._extra_lun_or_snap_id(volume)
@@ -975,7 +992,8 @@ class CCFS3000Helper(object):
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif resp < 0:
-            err_msg = 'can not get volume/snapshot size by id %s err %s' % (lun_or_snap_id, resp)
+            err_msg = ('can not get volume/snapshot size by id %s err %s' %
+                       (lun_or_snap_id, resp))
             raise exception.VolumeBackendAPIException(data=err_msg)
 
         size_kb = int(resp)/1024
@@ -987,7 +1005,8 @@ class CCFS3000Helper(object):
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not self._api_exec_success(resp):
-            err_msg = 'rollback to snapshot %s/%s failed with err %s.' % (snapshot['name'], snap_id, resp['code'])
+            err_msg = ('rollback to snapshot %s/%s failed with err %s.' %
+                       (snapshot['name'], snap_id, resp['code']))
             raise exception.VolumeBackendAPIException(data=err_msg)
         lun_id = self._extra_lun_or_snap_id(snapshot['volume'])
         self._wait_replica_complete(lun_id)
@@ -1016,7 +1035,8 @@ class CCFS3000Helper(object):
             else:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not self._api_exec_success(resp):
-            err_msg = 'delete volume %s/%s failed with err %s.' % (volume['name'], lun_id, resp['code'])
+            err_msg = ('delete volume %s/%s failed with err %s.' %
+                       (volume['name'], lun_id, resp['code']))
             raise exception.VolumeBackendAPIException(data=err_msg)
 
     def create_snapshot(self, snapshot, name, snap_desc):
@@ -1025,22 +1045,24 @@ class CCFS3000Helper(object):
         lun_id = self._extra_lun_or_snap_id(snapshot['volume'])
         lun_size = snapshot['volume']['size']
         if not lun_id:
-            msg = _('Failed to get LUN ID for volume %s') %\
-                snapshot['volume']['name']
+            msg = _('Failed to get LUN ID for volume %s' %
+                    snapshot['volume']['name'])
             raise exception.VolumeBackendAPIException(data=msg)
         err, resp = self.client.create_snap(
             lun_id, name, lun_size, snap_desc)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not self._api_exec_success(resp):
-            err_msg = 'create snapshot from volume %s/%s failed with err %s.' % (snapshot['volume']['name'], lun_id, resp['code'])
+            err_msg = ('create snapshot from volume %s/%s failed with err %s.'
+                       % (snapshot['volume']['name'], lun_id, resp['code']))
             raise exception.VolumeBackendAPIException(data=err_msg)
 
         err, snap = self.client.get_snap_by_name(lun_id, name)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not snap:
-            err_msg = 'can not get snapshot %(name)s by lun_id %(lun_id)s' % {'name': name, 'lun_id': lun_id}
+            err_msg = ('can not get snapshot %(name)s by lun_id %(lun_id)s' %
+                       {'name': name, 'lun_id': lun_id})
             raise exception.VolumeBackendAPIException(data=err_msg)
 
         pl_dict = {'system': self.storage_serial_number,
@@ -1054,26 +1076,30 @@ class CCFS3000Helper(object):
     def delete_snapshot(self, snapshot):
         """Gets the snap id by the snap name and delete the snapshot."""
         snap_id = self._extra_lun_or_snap_id(snapshot)
-        if not snap_id:	#TODO: add log message
+        if not snap_id:	 # TODO: add log message
             return
         err, resp = self.client.delete_snap(snap_id)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not self._api_exec_success(resp):
-            err_msg = 'delete snapshot %s/%s failed with err %s.' % (snapshot['name'], snap_id, resp['code'])
+            err_msg = ('delete snapshot %s/%s failed with err %s.' %
+                       (snapshot['name'], snap_id, resp['code']))
             raise exception.VolumeBackendAPIException(data=err_msg)
 
     def extend_volume(self, volume, new_size):
         origin_size = volume['size']
         if origin_size >= new_size:
-            raise exception.VolumeBackendAPIException("New size for extend must be greater than current size. (current: %s, extended: %s)" % (origin_size, new_size))
+            err_msg = ('New size for extend must be greater than current size.'
+                       '(current: %s, extended: %s)' % (origin_size, new_size))
+            raise exception.VolumeBackendAPIException(data=err_msg)
         extend_size = new_size - origin_size
         lun_id = self._extra_lun_or_snap_id(volume)
         err, resp = self.client.extend_lun(lun_id, extend_size)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
         elif not self._api_exec_success(resp):
-            err_msg = 'extend volume %s/%s failed with err %s.' % (volume['name'], lun_id, resp['code'])
+            err_msg = ('extend volume %s/%s failed with err %s.' %
+                       (volume['name'], lun_id, resp['code']))
             raise exception.VolumeBackendAPIException(data=err_msg)
 
     def _extract_iscsi_uids(self, connector):
@@ -1114,16 +1140,6 @@ class CCFS3000Helper(object):
         orphan_initiators = []
         new_initiator_uids = []
         registered_initiators = initiator_uids
-        #for initiator_uid in initiator_uids:
-        #    initiator = self.client.get_initiator_by_uid(initiator_uid)
-        #    if initiator:
-        #        initiator = initiator[0]
-        #        if 'parentHost' in initiator and initiator['parentHost']:
-        #            registered_initiators.append(initiator)
-        #        else:
-        #            orphan_initiators.append(initiator)
-        #    else:
-        #        new_initiator_uids.append(initiator_uid)
         return registered_initiators, orphan_initiators, new_initiator_uids
 
     def _extract_host_id(self, registered_initiators, hostname=None):
@@ -1199,11 +1215,12 @@ class CCFS3000Helper(object):
 
     def expose_lun(self, volume, lun_data, initiators):
         for initiator in initiators:
-            active_wwns = self.client.get_active_fc_wwns(str(initiator).upper())
+            active_wwns = self.client.get_active_fc_wwns(initiator)
             if not active_wwns:
                 LOG.debug("don't expose init %s", initiator)
                 continue
-            err, resp = self.client.get_used_luns(self.storage_protocol, initiator)
+            err, resp = self.client.get_used_luns(self.storage_protocol,
+                                                  initiator)
             if err:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
 
@@ -1215,16 +1232,17 @@ class CCFS3000Helper(object):
 
             lun_id = lun_data['Id']
             err, resp = self.client.expose_lun(lun_id, host_lun, initiator,
-                            self.storage_protocol)
+                                               self.storage_protocol)
             if err:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
             elif not self._api_exec_success(resp):
-                err_msg = _('%s createLunMapping(%s %s %s) failed with err %s.' %
-                        (self.storage_protocol, lun_id, host_lun, initiator, resp['code']))
+                err_msg = _('%s createLunMapping(%s %s %s) failed, err %s.' %
+                            (self.storage_protocol, lun_id, host_lun,
+                             initiator, resp['code']))
                 raise exception.VolumeBackendAPIException(data=err_msg)
 
-            LOG.debug("exposed_lun lun_id %s init %s host_lun %s",
-                lun_id, initiator, host_lun)
+            LOG.debug('exposed_lun lun_id %s init %s host_lun %s',
+                      lun_id, initiator, host_lun)
 
     def _get_driver_volume_type(self):
         if self.storage_protocol == 'iSCSI':
@@ -1258,8 +1276,8 @@ class CCFS3000Helper(object):
                 host_lun = mapping['lunNumber']
                 return host_lun
 
-        err_msg = _('get_all_lun_map (%s %s %s) cant find host_lun' % 
-            (initiator, lun_id, protocol))
+        err_msg = _('get_all_lun_map (%s %s %s) cant find host_lun' %
+                    (initiator, lun_id, protocol))
         raise exception.VolumeBackendAPIException(data=err_msg)
 
     def get_connection_info(self, volume, connector,
@@ -1277,7 +1295,7 @@ class CCFS3000Helper(object):
             data['target_iqn'] = target_iqns[0]
             data['target_portal'] = target_portals[0]
             # TODO kevin, for iSCSI multipath
-            #if ( multipath ):
+            # if ( multipath ):
             #    data['target_iqns'] = target_iqns
             #    data['target_portals'] = target_portals
             #    data['target_luns'] = [host_lun] * len(targets)
@@ -1296,19 +1314,19 @@ class CCFS3000Helper(object):
         cli_conf = {
             'cli_retry_time': 2,
         }
- 
+
         return command(cli_conf).execute(*args, **kwargs)
- 
+
     def _execute(self, cli_type, *args, **kwargs):
         LOG.debug('Executing command type: %(type)s.', {'type': cli_type})
- 
+
         rc, out = self._execute_command(cli_type, *args, **kwargs)
- 
+
         if rc != 0:
             raise exception.VolumeBackendAPIException(data=ec)
- 
+
         return rc, out
- 
+
     def _do_iscsi_discovery(self, target_ip):
         rc, targets = self._execute(
             'ExecuteCommand',
@@ -1316,7 +1334,7 @@ class CCFS3000Helper(object):
             '-t', 'sendtargets', '-p',
             target_ip,
             run_as_root=True)
- 
+
         target_iqns = []
         target_portals = []
         if rc != 0:
@@ -1330,10 +1348,10 @@ class CCFS3000Helper(object):
                 target_iqns.append(words[1])
                 target_portals.append(words[0].split(",")[0])
 
-            LOG.debug("target_iqns %s, portals %s",
-                target_iqns, target_portals)
+            LOG.debug('target_iqns %s, portals %s', target_iqns,
+                      target_portals)
             return (True, target_iqns, target_portals)
- 
+
         return (False, target_iqns, target_portals)
 
     def _convert_wwns_fs3000_to_openstack(self, wwns):
@@ -1355,13 +1373,13 @@ class CCFS3000Helper(object):
 
         initiator_wwns = connector['wwpns']
         for initiator in initiator_wwns:
-            active_wwns = self.client.get_active_fc_wwns(str(initiator).upper())
-            active_wwns =(self._convert_wwns_fs3000_to_openstack(active_wwns))
+            active_wwns = self.client.get_active_fc_wwns(initiator)
+            active_wwns = self._convert_wwns_fs3000_to_openstack(active_wwns)
             for wwn in active_wwns:
                 target_wwns.append(str(wwn))
             init_targ_map[str(initiator).upper()] = active_wwns
 
-        LOG.debug("init_targ_map %s target_wwns %s", init_targ_map, target_wwns)
+        LOG.debug('init_tgt_map %s target_wwns %s', init_targ_map, target_wwns)
         return {'initiator_target_map': init_targ_map,
                 'target_wwn': target_wwns}
 
@@ -1385,25 +1403,25 @@ class CCFS3000Helper(object):
     def hide_lun(self, volume, lun_data, initiators):
 
         for initiator in initiators:
-            active_wwns = self.client.get_active_fc_wwns(str(initiator).upper())
+            active_wwns = self.client.get_active_fc_wwns(initiator)
             if not active_wwns:
-                LOG.debug("don't hide_lun init %s", initiator)
+                LOG.debug('dont hide_lun init %s', initiator)
                 continue
             lun_id = lun_data['Id']
-            host_lun = self.get_host_lun(initiator, lun_id, self.storage_protocol)
+            host_lun = self.get_host_lun(initiator, lun_id,
+                                         self.storage_protocol)
 
-            err, resp = self.client.hide_lun(host_lun, initiator, self.storage_protocol)
+            err, resp = self.client.hide_lun(host_lun, initiator,
+                                             self.storage_protocol)
             if err:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
             elif not self._api_exec_success(resp):
-                err_msg = ('hide_lun (%s %s %s %s) failed with err %s.' % 
-                    (lun_id, initiator, host_lun, self.storage_protocol,
-                     resp['code']))
+                err_msg = ('hide_lun (%s %s %s %s) failed with err %s.' %
+                           (lun_id, initiator, host_lun, self.storage_protocol,
+                            resp['code']))
                 raise exception.VolumeBackendAPIException(data=err_msg)
 
     def get_fc_zone_info_for_empty_host(self, connector, host_id):
-        #@lockutils.synchronized('emc-vnxe-host-' + host_id,
-        #                        "emc-vnxe-host-", True)
         def _get_fc_zone_info_in_sync():
             if self.isHostContainsLUNs(host_id):
                 return {}
@@ -1424,15 +1442,16 @@ class CCFS3000Helper(object):
             host_id = connector['initiator']
 
         lun_data = self.get_lun_by_id(lun_id)
-        LOG.debug("term_conn lun_id %s, host_id %s, lun_data %s",
-                lun_id, host_id, lun_data)
+        LOG.debug('term_conn lun_id %s, host_id %s, lun_data %s',
+                  lun_id, host_id, lun_data)
         self.hide_lun(volume, lun_data, host_id)
 
         if self.storage_protocol == 'iSCSI':
             return
         elif self.storage_protocol == 'FC':
-            zone_info = self.get_fc_zone_info_for_empty_host(connector, host_id)
-            LOG.debug("term_conn zone_info %s", zone_info)
+            zone_info = self.get_fc_zone_info_for_empty_host(connector,
+                                                             host_id)
+            LOG.debug('term_conn zone_info %s', zone_info)
             return zone_info
 
     def isHostContainsLUNs(self, host_id):
@@ -1451,13 +1470,13 @@ class CCFS3000Helper(object):
     def update_volume_stats(self):
         self.update_slave_storage_ip()
 
-        LOG.debug("Updating volume stats")
+        LOG.debug('Updating volume stats')
         data = {}
         backend_name = self.configuration.safe_get('volume_backend_name')
         data['volume_backend_name'] = backend_name or 'CCFS3000Driver'
         data['storage_protocol'] = self.storage_protocol
         data['driver_version'] = VERSION
-        data['vendor_name'] = "Fortunet"
+        data['vendor_name'] = 'Fortunet'
 
         pools = self.client.get_pools()
         if not pools:
@@ -1471,9 +1490,9 @@ class CCFS3000Helper(object):
             self.storage_pools_map = self._build_storage_pool_id_map(pools)
         data['pools'] = map(
             lambda po: self._build_pool_stats(po), pools)
-        
+
         self.stats = data
-        #self.storage_targets = self._get_storage_targets()
+        # self.storage_targets = self._get_storage_targets()
         LOG.debug('Volume Stats: %s', data)
         return self.stats
 
@@ -1482,14 +1501,14 @@ class CCFS3000Helper(object):
             'pool_name': pool['Name'],
             'free_capacity_gb': int(pool['Free']) / GiB,
             'total_capacity_gb': int(pool['Size']) / GiB,
-            #'provisioned_capacity_gb': pool['sizeSubscribed'] / GiB,
+            # 'provisioned_capacity_gb': pool['sizeSubscribed'] / GiB,
             'provisioned_capacity_gb': 0,
             'reserved_percentage': 0,
-            #'thin_provisioning_support': self.thin_enabled,
+            # 'thin_provisioning_support': self.thin_enabled,
             'thin_provisioning_support': False,
             'thick_provisioning_support': True,
             'consistencygroup_support': True
-            #'max_over_subscription_ratio': self.max_over_subscription_ratio
+            # 'max_over_subscription_ratio': self.max_over_subscription_ratio
         }
         return pool_stats
 
@@ -1572,30 +1591,30 @@ class CCFS3000Driver(san.SanDriver):
         ret = self.helper.create_volume_from_snapshot(volume, snapshot)
         if self.configuration.flatten_volume_from_snapshot:
             self.helper.flatten_volume(volume)
-	return ret
+        return ret
 
-    def is_flatten_volume (self, volume):
+    def is_flatten_volume(self, volume):
         return self.helper.is_flatten_volume(volume)
 
-    def flatten_volume (self, volume):
+    def flatten_volume(self, volume):
         return self.helper.flatten_volume(volume)
 
     def rollback_to_snapshot(self, snapshot):
         return self.helper.rollback_to_snapshot(snapshot)
 
-    def get_volume_size (self, volume):
+    def get_volume_size(self, volume):
         return self.helper.get_volume_or_snapshot_size(volume)
 
-    def get_snapshot_size (self, snapshot):
+    def get_snapshot_size(self, snapshot):
         return self.helper.get_volume_or_snapshot_size(snapshot)
 
     def create_cloned_volume(self, volume, src_vref):
         return self.helper.create_cloned_volume(volume, src_vref)
 
     def create_full_cloned_volume(self, volume, src_vref):
-	ret = self.helper.create_cloned_volume(volume, src_vref)
-	self.helper.flatten_volume(volume)
-	return ret
+        ret = self.helper.create_cloned_volume(volume, src_vref)
+        self.helper.flatten_volume(volume)
+        return ret
 
     def delete_volume(self, volume):
         return self.helper.delete_volume(volume)
@@ -1609,8 +1628,7 @@ class CCFS3000Driver(san.SanDriver):
         LOG.info(_LI('Create snapshot: %(snapshot)s: volume: %(volume)s'),
                  {'snapshot': snapshotname, 'volume': volumename})
 
-        return self.helper.create_snapshot(
-            snapshot, snapshotname, snap_desc)
+        return self.helper.create_snapshot(snapshot, snapshotname, snap_desc)
 
     def delete_snapshot(self, snapshot):
         """Delete a snapshot."""
@@ -1636,12 +1654,12 @@ class CCFS3000Driver(san.SanDriver):
     def manage_existing_get_size(self, volume, existing_ref):
         """Return size of volume to be managed by manage_existing."""
         pass
-        #return self.helper.manage_existing_get_size(
+        # return self.helper.manage_existing_get_size(
         #    volume, existing_ref)
 
     def manage_existing(self, volume, existing_ref):
         pass
-        #return self.helper.manage_existing(
+        # return self.helper.manage_existing(
         #    volume, existing_ref)
 
     def unmanage(self, volume):

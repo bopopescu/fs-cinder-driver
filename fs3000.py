@@ -1599,7 +1599,7 @@ class CCFS3000Driver(san.SanDriver):
     def flatten_volume(self, volume):
         return self.helper.flatten_volume(volume)
 
-    def rollback_to_snapshot(self, snapshot):
+    def rollback_to_snapshot(self, snapshot, volume):
         return self.helper.rollback_to_snapshot(snapshot)
 
     def get_volume_size(self, volume):
@@ -1610,11 +1610,6 @@ class CCFS3000Driver(san.SanDriver):
 
     def create_cloned_volume(self, volume, src_vref):
         return self.helper.create_cloned_volume(volume, src_vref)
-
-    def create_full_cloned_volume(self, volume, src_vref):
-        ret = self.helper.create_cloned_volume(volume, src_vref)
-        self.helper.flatten_volume(volume)
-        return ret
 
     def delete_volume(self, volume):
         return self.helper.delete_volume(volume)

@@ -25,8 +25,8 @@ import time
 import types
 import urllib2
 
-from cinder.openstack.common import log as logging
-from cinder.openstack.common import loopingcall
+from oslo_log import log as logging
+from oslo_service import loopingcall
 from oslo_config import cfg
 from taskflow.patterns import linear_flow
 from taskflow import task

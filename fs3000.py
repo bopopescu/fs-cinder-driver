@@ -18,17 +18,16 @@ Drivers for Frotunet FS3000 array based on RESTful API.
 
 import cookielib
 import json
-import random
 import re
-import types
-import urllib2
-import time
-
-from oslo.config import cfg
-from cinder.openstack.common import loopingcall
-from cinder.openstack.common import log as logging
 import six
 import taskflow.engines
+import time
+import types
+import urllib2
+
+from cinder.openstack.common import log as logging
+from cinder.openstack.common import loopingcall
+from oslo_config import cfg
 from taskflow.patterns import linear_flow
 from taskflow import task
 from taskflow.utils import misc
@@ -36,12 +35,12 @@ from taskflow.utils import misc
 from cinder import exception
 from cinder.i18n import _, _LW, _LI, _LE
 from cinder.volume.configuration import Configuration
+from cinder.volume.drivers.infortrend.eonstor_ds_cli import cli_factory as cli
 from cinder.volume.drivers.san import san
 from cinder.volume import manager
 from cinder.volume import utils as vol_utils
 from cinder.volume import volume_types
 from cinder.zonemanager import utils as zm_utils
-from cinder import utils
 
 LOG = logging.getLogger(__name__)
 
@@ -136,8 +135,8 @@ class CCFS3000RESTClient(object):
         self.active_storage_ip = master_ip
         self.slave_storage_ip = slave_ip
         self.port = port
-        LOG.info('init active storate ip %s, slave storage ip %s' %
-                 (master_ip, slave_ip))
+        LOG.info(_LI('init active %(m_ip)s , slave %(s_ip)s'),
+                 {'m_ip': master_ip, 'm_ip': slave_ip})
         self.mgmt_url = 'https://%(host)s:%(port)s' % {'host': master_ip,
                                                        'port': port}
         self.debug = debug
@@ -153,7 +152,8 @@ class CCFS3000RESTClient(object):
 
     def set_slave_storage_ip(self, slave_ip):
         if self.slave_storage_ip != slave_ip:
-            LOG.info('set slave storage ip %s' % slave_ip)
+            LOG.info(_LI('set slave storage ip %(s_ip)s'),
+                     {'s_ip': slave_ip})
         self.slave_storage_ip = slave_ip
 
     def _http_log_req(self, req):
@@ -256,7 +256,8 @@ class CCFS3000RESTClient(object):
                        'messages': six.text_type(http_err),
                        'request': req}
         except Exception as ex:
-            LOG.warning('_request: Exception %s' % ex)
+            LOG.warning(_LI('_request: Exception %(ex)s'),
+                        {'ex': ex})
             err = ex
         finally:
             if not return_rest_err:
@@ -303,8 +304,9 @@ class CCFS3000RESTClient(object):
                     self._login(assign_url=try_ha_url)
                 if not try_login_err:
                     if 'permission' in try_login_resp:
-                        LOG.info('request ha: active storage ip change to %s' %
-                                 self.slave_storage_ip)
+                        LOG.info(_LI('request ha: active storage ip change'
+                                 ' to %(s_ip)s'),
+                                 {'s_ip': self.slave_storage_ip})
                         self.active_storage_ip, self.slave_storage_ip =\
                             self.slave_storage_ip, self.active_storage_ip
                         self.mgmt_url = try_ha_url
@@ -312,8 +314,8 @@ class CCFS3000RESTClient(object):
                         rel_url = self._getRelURL(url_para)
                         err, resp = self._request(rel_url)
                     elif 'code' in try_login_resp:
-                        LOG.warning('request ha: login with err %s' %
-                                    try_login_resp['code'])
+                        LOG.warning(_LW('request ha: login with err %(code)s'),
+                                    {'code': try_login_resp['code']})
             return err, resp
         return ha_inner
 
@@ -321,19 +323,21 @@ class CCFS3000RESTClient(object):
     def request(self, url_para):
         err, resp = self._is_login()
         if err:
-            LOG.warning('request: check is login failed.')
+            LOG.warning(_LW('request: check is login failed.'))
             return err, resp
         elif 'login' in resp:
             if resp['login'] == 'false':
                 err, resp = self._login()
                 if err:
-                    LOG.warning('request: login failed.')
+                    LOG.warning(_LW('request: login failed.'))
                     return err, resp
                 elif 'code' in resp:
-                    LOG.warning('request: login with err %s' % resp['code'])
+                    LOG.warning(_LW('request: login with err %(code)s'),
+                                {'code': resp['code']})
                     return err, resp
         else:
-            LOG.warning('request: check is login resp without login parameter')
+            LOG.warning(_LW('request: check is login resp without'
+                            'login parameter'))
             return err, resp
 
         rel_url = self._getRelURL(url_para)
@@ -549,7 +553,7 @@ class CCFS3000RESTClient(object):
         url_para = {'service': 'LvService',
                     'action': 'doExpandLvSize',
                     'lvId': lun_id,
-                    'expandedSizeMB': size*1024}
+                    'expandedSizeMB': size * 1024}
         err, resp = self.request(url_para)
         return (err, None) if err else \
             (err, resp)
@@ -848,18 +852,18 @@ class CCFS3000Helper(object):
             try:
                 err, lun = self.client.get_lun_by_id(lun_id)
                 if err:
-                    LOG.exception('Cannot detect replica status with err=%s' %
-                                  err)
+                    LOG.exception(_LE('Cannot detect replica status with'
+                                  'err=%s') % err)
                 elif not lun:
-                    LOG.exception('Cannot detect replica status.(lun id %s not'
-                                  ' exist)' % lun_id)
+                    LOG.exception(_LE('Cannot detect replica status.(lun id'
+                                  ' %s not exist)') % lun_id)
                 LOG.debug('Check lv %s replica status.' % lun_id)
                 LOG.debug(lun)
                 if not lun['cpProgress']:  # copy finish
                     check_done = True
             except Exception as ex:
                 check_done = False
-                LOG.exception('Cannot detect replica status. ex=%s' % ex)
+                LOG.exception(_LE('Cannot detect replica status. ex=%s') % ex)
 
             if check_done:
                 LOG.debug('Lv %s replica Finish.' % lun_id)
@@ -996,7 +1000,7 @@ class CCFS3000Helper(object):
                        (lun_or_snap_id, resp))
             raise exception.VolumeBackendAPIException(data=err_msg)
 
-        size_kb = int(resp)/1024
+        size_kb = int(resp) / 1024
         return size_kb
 
     def rollback_to_snapshot(self, snapshot):
@@ -1045,8 +1049,8 @@ class CCFS3000Helper(object):
         lun_id = self._extra_lun_or_snap_id(snapshot['volume'])
         lun_size = snapshot['volume']['size']
         if not lun_id:
-            msg = _('Failed to get LUN ID for volume %s' %
-                    snapshot['volume']['name'])
+            msg = ('Failed to get LUN ID for volume %s' %
+                   snapshot['volume']['name'])
             raise exception.VolumeBackendAPIException(data=msg)
         err, resp = self.client.create_snap(
             lun_id, name, lun_size, snap_desc)
@@ -1076,7 +1080,7 @@ class CCFS3000Helper(object):
     def delete_snapshot(self, snapshot):
         """Gets the snap id by the snap name and delete the snapshot."""
         snap_id = self._extra_lun_or_snap_id(snapshot)
-        if not snap_id:	 # TODO: add log message
+        if not snap_id:	 # TODO(SNAPSHOT): add log message
             return
         err, resp = self.client.delete_snap(snap_id)
         if err:
@@ -1236,10 +1240,13 @@ class CCFS3000Helper(object):
             if err:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
             elif not self._api_exec_success(resp):
-                err_msg = _('%s createLunMapping(%s %s %s) failed, err %s.' %
-                            (self.storage_protocol, lun_id, host_lun,
-                             initiator, resp['code']))
-                raise exception.VolumeBackendAPIException(data=err_msg)
+                msg = (_('%(p)s createLunMapping %s(l) %(h)s %(i)s failed,'
+                         ' err %(r)s.') % {'p': self.storage_protocol,
+                                           'l': lun_id,
+                                           'h': host_lun,
+                                           'i': initiator,
+                                           'r': resp['code']})
+                raise exception.VolumeBackendAPIException(data=msg)
 
             LOG.debug('exposed_lun lun_id %s init %s host_lun %s',
                       lun_id, initiator, host_lun)
@@ -1276,9 +1283,7 @@ class CCFS3000Helper(object):
                 host_lun = mapping['lunNumber']
                 return host_lun
 
-        err_msg = _('get_all_lun_map (%s %s %s) cant find host_lun' %
-                    (initiator, lun_id, protocol))
-        raise exception.VolumeBackendAPIException(data=err_msg)
+        return host_lun
 
     def get_connection_info(self, volume, connector,
                             lun_id, host_id):
@@ -1288,13 +1293,20 @@ class CCFS3000Helper(object):
                 'volume_id': volume['id']}
 
         host_lun = self.get_host_lun(host_id, lun_id, self.storage_protocol)
+        if (host_lun == -1):
+            msg = (_('get_all_lun_map, cant get host_lun %(h)s %(l)s %(p)s') %
+                   {'h': host_id,
+                    'l': lun_id,
+                    'p': self.storage_protocol})
+            LOG.error(msg)
+            raise exception.VolumeBackendAPIException(data=msg)
         data['target_lun'] = host_lun
         if self.storage_protocol == 'iSCSI':
             err, target_iqns, target_portals =\
                 self._do_iscsi_discovery(self.client.get_active_storage_ip())
             data['target_iqn'] = target_iqns[0]
             data['target_portal'] = target_portals[0]
-            # TODO kevin, for iSCSI multipath
+            # TODO(kevin) for iSCSI multipath
             # if ( multipath ):
             #    data['target_iqns'] = target_iqns
             #    data['target_portals'] = target_portals
@@ -1323,7 +1335,7 @@ class CCFS3000Helper(object):
         rc, out = self._execute_command(cli_type, *args, **kwargs)
 
         if rc != 0:
-            raise exception.VolumeBackendAPIException(data=ec)
+            raise exception.VolumeBackendAPIException(data=rc)
 
         return rc, out
 
@@ -1389,7 +1401,7 @@ class CCFS3000Helper(object):
         volume_flow = linear_flow.Flow(flow_name)
         lun_id = self._extra_lun_or_snap_id(volume)
         lun_data = self.get_lun_by_id(lun_id)
-        multipath = connector.get('multipath', False)
+        # multipath = connector.get('multipath', False)
         volume_flow.add(ArrangeHostTask(self, connector),
                         ExposeLUNTask(self, volume, lun_data),
                         GetConnectionInfoTask(self, volume, lun_data,
@@ -1435,7 +1447,7 @@ class CCFS3000Helper(object):
 
     def terminate_connection(self, volume, connector, **kwargs):
         lun_id = self._extra_lun_or_snap_id(volume)
-        multipath = connector.get('multipath', False)
+        # multipath = connector.get('multipath', False)
         if self.storage_protocol == 'FC':
             host_id = connector['wwpns']
         elif self.storage_protocol == 'iSCSI':

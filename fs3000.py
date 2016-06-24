@@ -136,7 +136,7 @@ class CCFS3000RESTClient(object):
         self.slave_storage_ip = slave_ip
         self.port = port
         LOG.info(_LI('init active %(m_ip)s , slave %(s_ip)s'),
-                 {'m_ip': master_ip, 'm_ip': slave_ip})
+                 {'m_ip': master_ip, 's_ip': slave_ip})
         self.mgmt_url = 'https://%(host)s:%(port)s' % {'host': master_ip,
                                                        'port': port}
         self.debug = debug

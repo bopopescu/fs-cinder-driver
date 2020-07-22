@@ -61,7 +61,7 @@ loc_opts = [
                      'allocated from this Cinder backend')),
     cfg.StrOpt('san_secondary_ip',
                default=None,
-               help='Storage slave ip.'),
+               help='Storage subordinate ip.'),
     cfg.IntOpt('fs3000_cli_timeout',
                default=525600,
                help=('Default timeout for CLI copy operations in minutes. '
@@ -128,16 +128,16 @@ class CCFS3000RESTClient(object):
     HostLUNAccessEnum_NoAccess = 0
     HostLUNAccessEnum_Production = 1
 
-    def __init__(self, master_ip, slave_ip, port=443, user='', password='',
+    def __init__(self, main_ip, subordinate_ip, port=443, user='', password='',
                  debug=False):
         self.username = user
         self.password = password
-        self.active_storage_ip = master_ip
-        self.slave_storage_ip = slave_ip
+        self.active_storage_ip = main_ip
+        self.subordinate_storage_ip = subordinate_ip
         self.port = port
-        LOG.info(_LI('init active %(m_ip)s , slave %(s_ip)s'),
-                 {'m_ip': master_ip, 's_ip': slave_ip})
-        self.mgmt_url = 'https://%(host)s:%(port)s' % {'host': master_ip,
+        LOG.info(_LI('init active %(m_ip)s , subordinate %(s_ip)s'),
+                 {'m_ip': main_ip, 's_ip': subordinate_ip})
+        self.mgmt_url = 'https://%(host)s:%(port)s' % {'host': main_ip,
                                                        'port': port}
         self.debug = debug
         self.cookie_jar = cookielib.CookieJar()
@@ -147,14 +147,14 @@ class CCFS3000RESTClient(object):
     def get_active_storage_ip(self):
         return self.active_storage_ip
 
-    def get_slave_storage_ip(self):
-        return self.slave_storage_ip
+    def get_subordinate_storage_ip(self):
+        return self.subordinate_storage_ip
 
-    def set_slave_storage_ip(self, slave_ip):
-        if self.slave_storage_ip != slave_ip:
-            LOG.info(_LI('set slave storage ip %(s_ip)s'),
-                     {'s_ip': slave_ip})
-        self.slave_storage_ip = slave_ip
+    def set_subordinate_storage_ip(self, subordinate_ip):
+        if self.subordinate_storage_ip != subordinate_ip:
+            LOG.info(_LI('set subordinate storage ip %(s_ip)s'),
+                     {'s_ip': subordinate_ip})
+        self.subordinate_storage_ip = subordinate_ip
 
     def _http_log_req(self, req):
         if not self.debug:
@@ -295,10 +295,10 @@ class CCFS3000RESTClient(object):
     def request_ha(req):
         def ha_inner(self, *args, **kwargs):
             err, resp = req(self, *args, **kwargs)
-            if err and self.slave_storage_ip:
-                LOG.debug('request ha: try slave storage')
+            if err and self.subordinate_storage_ip:
+                LOG.debug('request ha: try subordinate storage')
                 try_ha_url = ('https://%(host)s:%(port)s' %
-                              {'host': self.slave_storage_ip,
+                              {'host': self.subordinate_storage_ip,
                                'port': self.port})
                 try_login_err, try_login_resp =\
                     self._login(assign_url=try_ha_url)
@@ -306,9 +306,9 @@ class CCFS3000RESTClient(object):
                     if 'permission' in try_login_resp:
                         LOG.info(_LI('request ha: active storage ip change'
                                  ' to %(s_ip)s'),
-                                 {'s_ip': self.slave_storage_ip})
-                        self.active_storage_ip, self.slave_storage_ip =\
-                            self.slave_storage_ip, self.active_storage_ip
+                                 {'s_ip': self.subordinate_storage_ip})
+                        self.active_storage_ip, self.subordinate_storage_ip =\
+                            self.subordinate_storage_ip, self.active_storage_ip
                         self.mgmt_url = try_ha_url
                         url_para = args[0]
                         rel_url = self._getRelURL(url_para)
@@ -663,8 +663,8 @@ class CCFS3000Helper(object):
                 'valid': self.supported_storage_protocols}
             LOG.error(msg)
             raise exception.VolumeBackendAPIException(data=msg)
-        self.config_master_ip = self.configuration.san_ip
-        self.config_slave_ip = self.configuration.safe_get("san_secondary_ip")
+        self.config_main_ip = self.configuration.san_ip
+        self.config_subordinate_ip = self.configuration.safe_get("san_secondary_ip")
         self.cli_timeout = self.configuration.fs3000_cli_timeout
         self.storage_username = self.configuration.san_login
         self.storage_password = self.configuration.san_password
@@ -679,8 +679,8 @@ class CCFS3000Helper(object):
                 import FCSanLookupService
             self.lookup_service_instance =\
                 FCSanLookupService(configuration=self.configuration)
-        self.client = CCFS3000RESTClient(self.config_master_ip,
-                                         self.config_slave_ip,
+        self.client = CCFS3000RESTClient(self.config_main_ip,
+                                         self.config_subordinate_ip,
                                          443,
                                          self.storage_username,
                                          self.storage_password,
@@ -692,12 +692,12 @@ class CCFS3000Helper(object):
             raise exception.VolumeBackendAPIException(data=msg)
         self.storage_serial_number = system_info['serialNumber']
 
-        if self.config_slave_ip:
-            self.is_update_slave_ip = False
+        if self.config_subordinate_ip:
+            self.is_update_subordinate_ip = False
         else:
-            self.is_update_slave_ip = True
+            self.is_update_subordinate_ip = True
             if system_info['controllerHAMode'] == 'DUAL':
-                self.client.set_slave_storage_ip(system_info['slaveIp'])
+                self.client.set_subordinate_storage_ip(system_info['subordinateIp'])
 
         conf_pools = self.configuration.safe_get("storage_pool_names")
         # When managed_all_pools is True, the storage_pools_map will be
@@ -744,8 +744,8 @@ class CCFS3000Helper(object):
     def _build_storage_pool_id_map(self, pools):
         return {po['Name']: po['Id'] for po in pools}
 
-    def update_slave_storage_ip(self):
-        if not self.is_update_slave_ip:
+    def update_subordinate_storage_ip(self):
+        if not self.is_update_subordinate_ip:
             return
 
         sys_info = self.client.get_system_info()
@@ -753,11 +753,11 @@ class CCFS3000Helper(object):
             LOG.warning(_LW('update secondary storage ip: cannot get sysinfo'))
             return
 
-        slave_ip = None
+        subordinate_ip = None
         if sys_info['controllerHAMode'] == 'DUAL':
-            slave_ip = sys_info['slaveIp']
-        self.client.set_slave_storage_ip(slave_ip)
-        LOG.debug("Updated slave storage ip %s" % slave_ip)
+            subordinate_ip = sys_info['subordinateIp']
+        self.client.set_subordinate_storage_ip(subordinate_ip)
+        LOG.debug("Updated subordinate storage ip %s" % subordinate_ip)
         return
 
     def _get_iscsi_targets(self):
@@ -1480,7 +1480,7 @@ class CCFS3000Helper(object):
         return self.stats
 
     def update_volume_stats(self):
-        self.update_slave_storage_ip()
+        self.update_subordinate_storage_ip()
 
         LOG.debug('Updating volume stats')
         data = {}
